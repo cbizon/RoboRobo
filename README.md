@@ -1,128 +1,180 @@
 # research-programs
 
-A generic process for long-horizon research projects run by AI agents, with
-a human scientist checking in daily. A *program* is one project:
-miner2049er rule mining, gene–disease mechanism direction, granular-media
-simulations.
+Run a research project with an AI agent working on a schedule, while you
+check in once a day. One project is a *program*: for example, inferring
+gene–disease mechanism direction, or new experiments with the granular
+simulator.
 
-This is what separates a program from a set of Claude Code threads you check
-on:
+## Status
 
-1. **Work happens while you're away.** A schedule starts each session; a
-   thread waits for you.
-2. **The agent doesn't grade its own homework.** Each program has a
-   *referee* the agent can't edit or see inside.
-3. **State lives outside the conversation.** A program document, an
-   append-only ledger, and versioned evidence. Any fresh session resumes from
-   them.
-4. **"What counts" is decided before the results.** Experiments are
-   pre-registered; claims carry evidence requirements fixed in advance.
-5. **Budgets and gates.** Compute, scorer calls, money, and anything
-   irreversible have limits or need your approval.
-6. **One way of checking in.** Every program produces the same daily digest:
-   what was tried, what happened, what it means, up to five questions for
-   you, and the next move. If you don't answer, the agent follows its own
-   top proposal and stated defaults.
+Draft. What exists: this README, the files a new program starts from
+(`template/`), and the record formats (`schemas/`). What doesn't exist yet:
+the `program` command-line tool, the `/program` debrief skill, and any
+scheduling. The walkthrough below is how it is meant to work once those are
+built.
 
-## What a program is made of
+## How you use it
+
+### Once: install the tool
+
+```bash
+uv tool install ~/Projects/experiments/research-programs
+```
+
+This gives you the `program` command.
+
+### Starting a program
+
+1. **Create its repository.**
+
+   ```bash
+   program new ~/Projects/experiments/gene-disease-direction
+   ```
+
+   This makes a new git repository with the starting files from
+   `template/`.
+
+2. **Write the direction, with Claude's help.** Open Claude Code in the new
+   repository and work through `DIRECTION.md` together: the question, what's
+   in and out of scope, what the program should produce, how claims will be
+   judged, the acceptance bar, what the agent may do without asking, and
+   the budget in `budgets.yaml`. These are your decisions; Claude drafts,
+   you decide.
+
+3. **Build the referee.** Whatever will judge the work goes in `referee/`:
+   a hidden gold set and the script that scores against it, a frozen test
+   suite, a rating queue for you. Often the first job is building it, and
+   you check it before trusting it. Don't start sessions until it exists.
+
+4. **Approve.** You run:
+
+   ```bash
+   program approve DIRECTION.md budgets.yaml referee/
+   ```
+
+   This records fingerprints of those files. From then on, if anything
+   changes them (including the agent), `program check` fails.
+
+5. **Schedule sessions.** Set up the recurring session (a Claude Code
+   scheduled task, or a cluster job for heavy programs) and the morning
+   check.
+
+### Every day
+
+- **Overnight (or whenever it's scheduled), the agent works.** It reads
+  your direction, today's instruction, and the program's records; plans
+  experiments and writes each plan down before running it; runs them; asks
+  the referee to judge; and ends by writing a plain-language summary with up
+  to five questions for you. `program check` runs at the start and end and
+  stops the session if a rule was broken.
+- **In the morning, a one-line check** tells you whether a program needs
+  you ("gene-disease-direction: 3 questions") or stays quiet.
+- **When you have time, you debrief.** In Claude Code, run
+  `/program gene-disease-direction`. It explains what was tried, what
+  happened, and what it means; goes through the agent's questions with you;
+  answers "why" from the records; and drafts tonight's instruction. When you
+  approve the draft, it is saved for tonight's session.
+- **If you skip a day**, tonight's session follows the agent's own top
+  proposal and its stated defaults for your unanswered questions.
+
+### When you change course
+
+Edit `DIRECTION.md` (or the budget, or the referee) yourself, then run
+`program approve` on it again. The agent never edits those files.
+
+## What lives where
+
+- **This repository is the tool.** It provides the `program` command, the
+  record formats, the starting files, and the skills. Programs depend on a
+  pinned version of it.
+- **Each program is its own repository**, made by `program new`. The
+  starting files are copied once and then belong to the program. Its git
+  history is part of the audit (for example, that a plan was written before
+  its results), so programs don't share a repository.
+- **Command-line tools do anything that must be checked or enforced**
+  (`program new`, `approve`, `check`, `digest`), because a rule that Claude
+  enforces on itself isn't enforced. **Skills do the parts that need
+  conversation** (`/program`, the debrief), and call the command-line tools
+  for the facts.
+- **Large data** (simulation outputs, graph builds) lives on a cluster
+  volume or object storage; the program records where, with a checksum.
+
+## Inside a program
 
 ```
 <program>/
-  DIRECTION.md          human-only: question, bounds, autonomy, budgets, bar
-  PROGRAM.md            shared: approaches, research questions, current state
-  CLAUDE.md             the agent's standing brief (copied from the template)
-  referee/              human-only: what judges the work; agent can't edit
-  instructions/         dated instructions from the daily check-in, + fallback
-  ledger/               append-only records (JSONL, schemas in ../schemas)
-    experiments.jsonl   pre-registrations and their outcomes
-    claims.jsonl        claims and their status
-    decisions.jsonl     method decisions, who made them, why
-    blockers.jsonl      things stopping progress, until resolved or carried
-  sessions/             one summary per session (the digest's raw material)
-  evidence/             outputs the ledger points to: results, figures, data
-  budgets.yaml          human-only: resource limits the checker enforces
-  approvals.json        hashes of human-approved files (DIRECTION, budgets, referee)
+  DIRECTION.md          yours: question, bounds, claim rules, acceptance bar, autonomy
+  budgets.yaml          yours: resource limits the checker enforces
+  referee/              yours: what judges the work; the agent can run it, not edit it
+  approvals.json        fingerprints of the three above, written by `program approve`
+  PROGRAM.md            shared: research questions, current state, next steps
+  CLAUDE.md             the agent's standing instructions
+  instructions/         one dated instruction per day from your debrief, plus a fallback
+  ledger/               the record, append-only:
+    experiments.jsonl     each plan (written before running) and its outcome
+    claims.jsonl          claims and their status; only the referee or you admit one
+    decisions.jsonl       method choices, who made them, and why
+    blockers.jsonl        what's stuck, until resolved or explicitly carried forward
+  sessions/             one plain-language summary per session
+  evidence/             results, figures and data the records point to
 ```
 
-Per program you write three things: `DIRECTION.md`, the referee, and the
-tools or environment the agent works in. Everything else is shared.
+## Why not just Claude Code threads?
 
-## The daily cycle
+A thread waits for you, judges its own results, keeps its state in a
+conversation that drifts, and decides what counts after it sees the result.
+A program works while you're away, is judged by a referee it can't edit,
+keeps its state in files any new session can pick up, writes its plans down
+before running them, works within budgets, and reports to you in the same
+format every day. For quick exploration a thread is better; programs are for
+long-running work whose results you need to trust.
 
-1. **Session (scheduled).** The agent reads `DIRECTION.md`, `PROGRAM.md`,
-   the latest instruction (or the fallback if none is dated today), and the
-   ledger. It pre-registers experiments before running them, records
-   decisions and blockers as they come up, writes evidence, and asks the
-   referee to judge. It proposes claims; the referee's results and the
-   claim's evidence rules decide their status.
-2. **Session summary.** Before the session ends the agent writes
-   `sessions/<date>.json`: plain-language experiments, claims that changed
-   status, at most five questions with defaults, and ranked proposed
-   directions.
-3. **Check (scheduled, morning).** A one-line "does anything need you?".
-4. **Debrief (you, when you want).** A Claude Code skill walks you through
-   the summary in plain language, answers "why" from the evidence, and
-   drafts the next instruction. You approve it; it is written to
-   `instructions/<date>.md`.
+## Standing rules
 
-## Rules every program follows
-
-- **Direction is yours.** The agent never edits `DIRECTION.md`,
-  `budgets.yaml`, `referee/`, or `approvals.json`. This is enforced (deny rules in
-  `.claude/settings.json`, and the validator checks their hashes against
-  `approvals.json`), not just asked.
-- **Pre-register, then run.** An experiment record (hypothesis, method, how
-  it will be judged, what would falsify it, cost estimate) is written before
-  any result exists. Changing it afterwards means a new record that points to
-  the old one.
-- **Claims need evidence of the right kind.** Each claim has a class, and
-  each class in `DIRECTION.md` names the evidence it needs and the evidence
-  that can never support it (for example, tests the agent wrote itself).
-  When several rules apply, the strictest wins.
-- **Negative results are results.** A research question can close as
-  *negative*; that is recorded, not dropped.
-- **Blockers don't vanish.** A blocker is resolved, escalated to you, or
-  carried forward explicitly.
-- **Numbers trace to evidence.** Every number in a session summary must match
-  a value in a file under `evidence/` exactly. The validator rejects a
-  summary that doesn't.
-- **Budgets warn at 50, 80 and 100%.** At 100% the agent stops spending and
+- **Your files are yours.** The agent never edits `DIRECTION.md`,
+  `budgets.yaml`, `referee/` or `approvals.json`; `program check` catches it
+  if anything does.
+- **Plan, then run.** An experiment's plan (hypothesis, method, how it will
+  be judged, what would show it wrong, expected cost) is recorded before any
+  result exists. A changed plan is a new record pointing to the old one.
+- **Claims need the right evidence.** Each claim has a type, and
+  `DIRECTION.md` says what evidence each type needs and what can never count
+  (for example, tests the agent wrote itself). The strictest applicable rule
+  wins.
+- **Negative results are results.** A question can close as "no".
+- **Nothing stuck disappears.** A blocker is resolved, raised with you, or
+  carried forward with a reason.
+- **Numbers trace to evidence.** Every number in a summary must appear in an
+  evidence file; otherwise `program check` rejects the summary.
+- **Budgets warn at 50% and 80%**, and at 100% the agent stops spending and
   asks.
 
 ## Referees
 
-The referee is the part that's project-specific by nature, and the part
-worth your design time. Kinds, which can be combined:
+The referee is the part each program designs for itself. Kinds, which can be
+combined:
 
-| Kind | Example | Agent sees |
+| Kind | Example | What the agent sees |
 | --- | --- | --- |
 | Hidden answer key | miner2049er's scorer | aggregate scores only |
-| Frozen test suite | granular fidelity suite (reproduce the 1998 results) | pass/fail and diffs |
-| Hidden gold split | gene–disease direction gold set | scores on the hidden part |
-| Blind human rating | your morning ratings of a sample, with random controls | the ratings, later |
-| Downstream benchmark | direction qualifiers tested by miner2049er | the benchmark's result |
-
-A program with no referee is a thread with extra paperwork. Don't start one
-until its referee exists, even if the first experiment's job is to build it.
+| Frozen test suite | granular simulator: reproduce the 1998 results | pass/fail and differences |
+| Hidden gold set | gene–disease direction: a held-back part of the gold set | scores on the hidden part |
+| Blind rating by you | a daily sample of outputs, mixed with random controls | your ratings, afterwards |
+| Downstream benchmark | direction annotations tested by miner2049er | the benchmark's result |
 
 ## Where ideas came from
 
-- From **ResearchLoop** (Xia & Wang, arXiv 2605.28282): the human-only
-  direction file, the claim ledger and its statuses, per-class evidence
-  contracts with "strictest wins", forbidden evidence, falsification
-  conditions on research questions, negative closeouts, and conserved
-  blockers. Their enforcement is by convention; here it is checked.
-- From **AutoResearchClaw** (Liu et al., arXiv 2605.20025): numbers in
-  reports must trace to logged outputs (exact match here, not 1%), a measuring
-  harness the agent can't edit, a pilot check that the main measure varies
-  before spending, a skeptic's review of results, and budget warnings at
-  50/80/100%.
-- From **miner2049er**: the daily cadence, plain-language summaries,
-  at most five questions with defaults, dated instructions with a fallback,
-  and the morning digest.
+- **ResearchLoop** (Xia & Wang, arXiv 2605.28282): the human-only direction
+  file, the claim record and its statuses, evidence rules per claim type
+  with the strictest winning, forbidden evidence, falsification conditions,
+  negative closes, and conserved blockers. They enforce these by convention;
+  here `program check` does.
+- **AutoResearchClaw** (Liu et al., arXiv 2605.20025): numbers in reports
+  must match logged outputs (exactly, here), a measuring harness the agent
+  can't edit, a pilot run to check the measure varies before a big spend, a
+  skeptic's review of results, and budget warnings at 50/80/100%.
+- **miner2049er**: the daily rhythm, plain-language summaries, at most five
+  questions with defaults, dated instructions with a fallback, and the
+  morning check.
 
-## Status
-
-Draft. `template/` and `schemas/` are written; the tooling in
-[`TOOLS.md`](TOOLS.md) is specified, not built. The first program planned on
-this template is gene–disease mechanism direction.
+Tool details: [`TOOLS.md`](TOOLS.md).
