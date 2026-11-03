@@ -14,7 +14,8 @@ you can inspect.
 ## Status
 
 Draft. What exists: this README, the starting files for a new program
-(`template/`), and the formats for the program's records (`schemas/`). What
+(`template/`), the formats for the program's records (`schemas/`), and a
+specification of the tooling (`TOOLS.md`). What
 doesn't exist yet: the `program` command-line tool, the `/program` slash
 command, and the scheduling. Everything marked *(planned)* below describes how
 it will work once built.
@@ -25,8 +26,8 @@ it will work once built.
 - **Session**: one scheduled run of the agent, for example 11 pm to 6 am.
 - **Direction**: your written statement of what the program is for and the
   rules it runs under, in `DIRECTION.md`. Only you edit it.
-- **Referee**: whatever judges the agent's results, built so the agent can run
-  it but not change it or see inside it. Examples: a set of correct answers the
+- **Referee**: whatever judges the agent's results. The agent can submit work
+  to it but can't change it or see inside it. Examples: a set of correct answers the
   agent never sees, with a script that scores against them; a fixed test suite;
   or you, grading a sample of outputs without knowing which method produced
   each.
@@ -38,13 +39,17 @@ it will work once built.
   focus on. One per day, dated.
 - **Debrief**: your daily conversation with Claude about the last session,
   which ends with tomorrow's instruction.
+- **Open question**: one of the program's research questions, listed in
+  `PROGRAM.md`; it stays open until answered yes or no.
+- **Blocker**: anything stopping progress (missing data, a failing tool, a
+  decision only you can make), recorded until it's dealt with.
 
 ## How you use it
 
 ### Once: install the tool *(planned)*
 
 ```bash
-uv tool install ~/Projects/experiments/research-programs
+uv tool install <path to this repository>
 ```
 
 This gives you the `program` command.
@@ -88,8 +93,8 @@ This gives you the `program` command.
    ```
 
    This records a fingerprint (a file hash) of each in `approvals.json`. If
-   anything changes those files afterwards, including the agent, the checks
-   fail until you approve the change.
+   anything changes those files afterwards, including the agent,
+   `program check` (described below) fails until you approve the change.
 
 5. **Schedule it** *(planned)*. Set up the recurring session (a Claude Code
    scheduled task, which runs Claude on a timer, or a job on a computing
@@ -101,17 +106,19 @@ This gives you the `program` command.
   and the program's records. It writes down each experiment's plan before
   running it, runs it, asks the referee to judge the result, and records what
   happened. It ends by writing a plain-language summary of the session with up
-  to five questions for you. Each question comes with what the agent will do by
-  default if you don't answer.
-- **The rules are checked automatically.** `program check` runs at the start
-  and end of every session *(planned)*. It confirms your files are unchanged,
+  to five questions for you, each with what the agent will do by default if
+  you don't answer, and its ranked proposals for what to do next.
+- **The rules are checked automatically.** The scheduler runs
+  `program check` before and after every session, outside the agent's control
+  *(planned)*. It confirms your files are unchanged,
   that no record was rewritten, that each plan was written before its results,
   that every number in the summary appears in a results file, and that the
   budget isn't exceeded. If anything fails, the session stops and the morning
   check tells you.
-- **A morning check** sends you one line per program that needs you
+- **A morning check** gives you one line per program that needs you
   ("gene-disease-direction: 3 questions") and stays quiet otherwise
-  *(planned)*.
+  *(planned; how it reaches you, such as a desktop notification or a
+  message, is still to be decided)*.
 - **You debrief when you have time.** In Claude Code, run
   `/program gene-disease-direction` *(planned)*. It explains what was tried,
   what happened, and what it means; goes through the agent's questions with
@@ -140,13 +147,19 @@ Edit `DIRECTION.md`, `budgets.yaml` or the referee yourself, then run
   program can't touch another.
 - **Anything that has to be enforced is a command-line tool** (`program new`,
   `approve`, `check`, `digest`), because a rule the agent checks on itself
-  isn't really enforced. `program digest` produces the session summary for a
+  isn't really enforced. That only holds if the agent can't run the tools
+  that are yours: the scheduler, not the agent, runs `program check`, and
+  sessions should run where the agent can't write `approvals.json` or run
+  `program approve` (a separate account, or a container). How to arrange that
+  on a laptop is an open question in `TOOLS.md`. `program digest` produces the session summary for a
   human; the morning check and the debrief both use it. **The parts that need
   conversation are a Claude Code slash command** (`/program`).
 - **Large data** (simulation outputs, big datasets) lives on a cluster disk or
   in object storage; the program records where it is and a checksum.
 
 ## Inside a program
+
+This is what `program new` creates from `template/`:
 
 ```
 <program>/
@@ -195,7 +208,8 @@ is better. Programs are for weeks-long work whose results you need to trust.
   carried forward with a reason.
 - **Numbers trace to evidence.** Every number in a session summary must appear
   in a results file, or the summary is rejected.
-- **Budgets warn at 50% and 80%.** At 100% the agent stops spending and asks.
+- **Budgets warn at 50% and 80%**, in the session summary. At 100% the agent
+  stops spending and asks.
 - **Pilot before spending.** Before a large experiment, the agent runs a small
   one to check that the thing it will measure actually varies.
 
@@ -211,7 +225,7 @@ is better. Programs are for weeks-long work whose results you need to trust.
 
 ## Where the ideas came from
 
-- **miner2049er**, a nightly agent we built earlier that searches a biomedical
+- **miner2049er**, an earlier nightly agent by the same author that searches a biomedical
   knowledge graph for rules predicting drug treatments, scored against hidden
   answers. From it: the daily rhythm, plain-language summaries, at most five
   questions with defaults, dated instructions with a fallback, and the morning

@@ -67,6 +67,16 @@ Each program says in `DIRECTION.md` where its sessions run:
 
 ## Not yet decided
 
+- **Keeping the agent away from your tools.** `program check` and
+  `program approve` only enforce anything if the agent can't run `approve` or
+  rewrite `approvals.json`. On a cluster this is natural (the agent's pod
+  doesn't get the approval tooling or write access, as in miner2049er's
+  sealed volume). On a laptop it needs a separate account or a sandbox for
+  sessions, or approvals kept somewhere the session can't write, such as a
+  signed git commit checked by `program check`.
+- **How the morning check reaches you** (desktop notification, email draft,
+  message).
+
 - Where the shared registry of programs lives (for the morning check across
   programs).
 - Whether skeptic review of results is a separate scheduled session or part
