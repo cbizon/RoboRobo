@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/experiment.schema.json",
+  "title": "Experiment record (ledger/experiments.jsonl)",
+  "description": "A registration is written before results exist. Its outcome is a later record with the same experiment_id; a changed plan is a new registration that supersedes the old one.",
+  "type": "object",
+  "required": ["record", "experiment_id", "at", "by"],
+  "properties": {
+    "record": {"enum": ["registration", "outcome"]},
+    "experiment_id": {"$ref": "_common.schema.json#/$defs/id", "description": "E0001, E0002, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "rq_id": {"type": "string", "description": "Research question in PROGRAM.md"},
+    "supersedes": {"$ref": "_common.schema.json#/$defs/id"},
+    "hypothesis": {"$ref": "_common.schema.json#/$defs/text"},
+    "method": {"$ref": "_common.schema.json#/$defs/text"},
+    "judged_by": {"$ref": "_common.schema.json#/$defs/text", "description": "Which referee check, on what data, with what threshold"},
+    "falsified_if": {"$ref": "_common.schema.json#/$defs/text"},
+    "cost_estimate": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}, "description": "Resource name from DIRECTION.md budgets -> amount"},
+    "status": {"enum": ["supported", "falsified", "inconclusive", "abandoned"]},
+    "result": {"$ref": "_common.schema.json#/$defs/text"},
+    "cost_actual": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+    "evidence": {"$ref": "_common.schema.json#/$defs/evidenceRefs"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"record": {"const": "registration"}}},
+      "then": {"required": ["rq_id", "hypothesis", "method", "judged_by", "falsified_if", "cost_estimate"]}
+    },
+    {
+      "if": {"properties": {"record": {"const": "outcome"}}},
+      "then": {"required": ["status", "result", "cost_actual", "evidence"]}
+    }
+  ],
+  "additionalProperties": false
+}

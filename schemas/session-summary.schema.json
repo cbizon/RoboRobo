@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/session-summary.schema.json",
+  "title": "Session summary (sessions/YYYY-MM-DD.json)",
+  "description": "Written for a scientist who didn't watch the session. Prose fields are plain language; every number in them must appear exactly in a file under evidence/ (checked by `program check`).",
+  "type": "object",
+  "required": ["date", "instruction", "headline", "experiments", "claims_changed", "questions", "proposed_directions", "budget", "open_blockers"],
+  "properties": {
+    "date": {"type": "string", "format": "date"},
+    "instruction": {"type": "string", "description": "Path of the instruction followed (a dated file or fallback.md)"},
+    "headline": {"$ref": "_common.schema.json#/$defs/text", "description": "Two or three sentences: what the session was for and what was learned"},
+    "experiments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["experiment_id", "question", "what_was_done", "result", "takeaway"],
+        "properties": {
+          "experiment_id": {"$ref": "_common.schema.json#/$defs/id"},
+          "question": {"$ref": "_common.schema.json#/$defs/text"},
+          "what_was_done": {"$ref": "_common.schema.json#/$defs/text"},
+          "result": {"$ref": "_common.schema.json#/$defs/text"},
+          "takeaway": {"$ref": "_common.schema.json#/$defs/text"},
+          "graded_by_referee": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "claims_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim_id", "status", "plain_statement", "why"],
+        "properties": {
+          "claim_id": {"$ref": "_common.schema.json#/$defs/id"},
+          "status": {"type": "string"},
+          "plain_statement": {"$ref": "_common.schema.json#/$defs/text"},
+          "why": {"$ref": "_common.schema.json#/$defs/text"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["question", "why_it_matters", "default_if_unanswered"],
+        "properties": {
+          "question": {"$ref": "_common.schema.json#/$defs/text"},
+          "why_it_matters": {"$ref": "_common.schema.json#/$defs/text"},
+          "default_if_unanswered": {"$ref": "_common.schema.json#/$defs/text"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "proposed_directions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["direction", "rationale"],
+        "properties": {
+          "direction": {"$ref": "_common.schema.json#/$defs/text"},
+          "rationale": {"$ref": "_common.schema.json#/$defs/text"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["spent", "limit"],
+        "properties": {
+          "spent": {"type": "number", "minimum": 0},
+          "limit": {"type": "number", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "open_blockers": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}},
+    "decisions_needing_you": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}}
+  },
+  "additionalProperties": false
+}

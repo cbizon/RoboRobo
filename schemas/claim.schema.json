@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/claim.schema.json",
+  "title": "Claim record (ledger/claims.jsonl)",
+  "description": "The first record for a claim is 'planned'; each status change is a new record. 'admitted' requires the class's required evidence (DIRECTION.md) and is checked by `program check`.",
+  "type": "object",
+  "required": ["claim_id", "at", "by", "status"],
+  "properties": {
+    "claim_id": {"$ref": "_common.schema.json#/$defs/id", "description": "C0001, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "status": {"enum": ["planned", "admitted", "blocked", "contradicted", "forbidden", "withdrawn"]},
+    "statement": {"$ref": "_common.schema.json#/$defs/text"},
+    "claim_class": {"type": "string", "description": "A class from DIRECTION.md"},
+    "rq_id": {"type": "string"},
+    "scope": {"$ref": "_common.schema.json#/$defs/text", "description": "Where the claim holds and where it isn't claimed to"},
+    "experiments": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}},
+    "evidence": {"$ref": "_common.schema.json#/$defs/evidenceRefs"},
+    "reason": {"$ref": "_common.schema.json#/$defs/text", "description": "Why the status changed"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "planned"}}},
+      "then": {"required": ["statement", "claim_class", "rq_id", "scope"]},
+      "else": {"required": ["reason"]}
+    },
+    {
+      "if": {"properties": {"status": {"const": "admitted"}}},
+      "then": {"required": ["evidence"], "properties": {"by": {"enum": ["referee", "human"]}}}
+    }
+  ],
+  "additionalProperties": false
+}

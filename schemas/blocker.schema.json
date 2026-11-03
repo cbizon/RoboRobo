@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/blocker.schema.json",
+  "title": "Blocker (ledger/blockers.jsonl)",
+  "description": "Open until a later record resolves it, escalates it to the human, or carries it forward with a reason. `program check` fails if a session ends with an open blocker it didn't mention.",
+  "type": "object",
+  "required": ["blocker_id", "at", "by", "status", "description"],
+  "properties": {
+    "blocker_id": {"$ref": "_common.schema.json#/$defs/id", "description": "B0001, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "status": {"enum": ["open", "resolved", "escalated", "carried"]},
+    "kind": {"enum": ["technical", "data", "compute", "budget", "judgment", "external"]},
+    "description": {"$ref": "_common.schema.json#/$defs/text"},
+    "blocks": {"type": "array", "items": {"type": "string"}},
+    "resolution": {"$ref": "_common.schema.json#/$defs/text"}
+  },
+  "if": {"properties": {"status": {"enum": ["resolved", "carried"]}}},
+  "then": {"required": ["resolution"]},
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(DIRECTION.md)",
+      "Write(DIRECTION.md)",
+      "Edit(approvals.json)",
+      "Write(approvals.json)",
+      "Edit(referee/**)",
+      "Write(referee/**)",
+      "Edit(budgets.yaml)",
+      "Write(budgets.yaml)"
+    ]
+  }
+}

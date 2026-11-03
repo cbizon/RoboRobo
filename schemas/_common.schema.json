@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/_common.schema.json",
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Z][0-9]{4}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "text": {"type": "string", "minLength": 10},
+    "actor": {"enum": ["agent", "human", "referee"]},
+    "evidenceRefs": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "description": "Paths under evidence/, or ledger ids"
+    }
+  }
+}

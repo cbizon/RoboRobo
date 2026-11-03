@@ -1,0 +1,6 @@
+# Human-only. Resource names match the keys experiments use in
+# cost_estimate / cost_actual. After editing: `program approve budgets.yaml`.
+budgets:
+  # compute_hours: {limit: 200, period: week}
+  # scorer_calls: {limit: 200, period: program}
+  # api_dollars: {limit: 50, period: week}

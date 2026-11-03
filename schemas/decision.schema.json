@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/decision.schema.json",
+  "title": "Method decision (ledger/decisions.jsonl)",
+  "description": "A choice a reasonable scientist could make differently. Decisions DIRECTION.md reserves for the human are 'proposed' until the human records 'made'.",
+  "type": "object",
+  "required": ["decision_id", "at", "by", "status", "decision", "rationale"],
+  "properties": {
+    "decision_id": {"$ref": "_common.schema.json#/$defs/id", "description": "D0001, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "status": {"enum": ["proposed", "made", "reversed"]},
+    "decision": {"$ref": "_common.schema.json#/$defs/text"},
+    "alternatives": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/text"}},
+    "rationale": {"$ref": "_common.schema.json#/$defs/text"},
+    "affects": {"type": "array", "items": {"type": "string"}, "description": "Experiment or RQ ids"},
+    "supersedes": {"$ref": "_common.schema.json#/$defs/id"}
+  },
+  "additionalProperties": false
+}
