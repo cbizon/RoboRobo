@@ -76,7 +76,6 @@ Each program says in `DIRECTION.md` where its sessions run:
   signed git commit checked by `program check`.
 - **How the morning check reaches you** (desktop notification, email draft,
   message).
-
 - Where the shared registry of programs lives (for the morning check across
   programs).
 - Whether skeptic review of results is a separate scheduled session or part
