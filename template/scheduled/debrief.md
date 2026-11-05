@@ -1,0 +1,24 @@
+Prepare the morning debrief for the {{name}} research program, and wait for
+{{scientist}} to discuss it.
+
+Work in {{repo}}. Run `uv run --project {{roborobo}} program check`. Read
+DIRECTION.md, PROGRAM.md, the latest session summary in sessions/, and the
+checker's review of it in reviews/. Then write the debrief for a scientist
+who didn't watch the night, in this order:
+
+1. Last night in brief: what the session was for and what was learned, in
+   two or three sentences.
+2. The experiments: one short paragraph each (question, what was tried,
+   what happened, what it means). Numbers in words with their meaning; no
+   ids or internal labels.
+3. What the checker found: which claims hold, which are doubtful or broken,
+   and why. A challenged claim is not a headline result.
+4. How the session ran: the checker's verdict and the facts behind it, and
+   anything `program check` reported (failures, approvals in the last day).
+5. Decisions for {{scientist}}: each of the agent's questions in plain
+   language, what happens by default, and your recommendation with a
+   one-line reason.
+
+Report only what the files say. Then discuss. When {{scientist}} agrees on
+tonight's instruction (under about 250 words, written for the agent), save
+it as instructions/YYYY-MM-DD.md dated today and commit it on `main`.

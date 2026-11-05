@@ -1,4 +1,4 @@
-# Program: <program name>
+# Program: {{name}}
 
 Shared. The agent keeps this current; you can edit it any time. It is the
 first thing a new session reads after `DIRECTION.md`, so keep it short and

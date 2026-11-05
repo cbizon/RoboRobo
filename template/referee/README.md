@@ -10,4 +10,4 @@ Hidden data (answer keys, gold splits) does not live in this repository at
 all. Keep it where only the referee process can read it, and give the agent
 an interface that returns aggregate results.
 
-After any change here, record new hashes with `program approve referee/`.
+After any change here, commit it and run `program approve`.

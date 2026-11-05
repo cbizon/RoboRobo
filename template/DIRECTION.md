@@ -1,7 +1,7 @@
-# Direction: <program name>
+# Direction: {{name}}
 
 Human-only. The agent reads this file and never edits it. After you change
-it, record its new hash with `program approve DIRECTION.md`.
+it, commit it and run `program approve`.
 
 ## The question
 
