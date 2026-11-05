@@ -120,7 +120,11 @@ This gives you the `program` command.
 
 5. **Schedule it** *(planned)*. Set up the recurring session (a Claude Code
    scheduled task, which runs Claude on a timer, or a job on a computing
-   cluster for heavy programs) and the morning check described below.
+   cluster for heavy programs) and the morning check described below. If
+   you're not sure the place you picked is good enough (a laptop that may
+   sleep, a small disk), have sessions fill in the optional
+   `run_conditions` in their summaries and the checker assess them, and
+   decide from that record after a couple of weeks.
 
 ### Every day
 
