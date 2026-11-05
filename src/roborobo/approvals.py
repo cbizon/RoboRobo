@@ -24,7 +24,7 @@ from roborobo.config import APPROVALS, Program
 from roborobo.gitutil import git, show
 
 TAG_PREFIX = "approved/"
-TAG_FORMAT = "%Y%m%dT%H%M%SZ"
+TAG_FORMAT = "%Y%m%dT%H%M%S%fZ"     # microseconds: two approvals can't collide
 
 
 def human_files(program: Program) -> list[str]:
@@ -60,6 +60,16 @@ def approve(program: Program, remote: str = "origin", now: datetime | None = Non
     return tag
 
 
+def tag_time(tag: str) -> datetime:
+    stamp = tag[len(TAG_PREFIX):]
+    for fmt in (TAG_FORMAT, "%Y%m%dT%H%M%SZ"):
+        try:
+            return datetime.strptime(stamp, fmt).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    raise ValueError(f"approval tag {tag} has no readable time")
+
+
 def remote_approvals(program: Program, remote: str = "origin") -> list[str]:
     """Approval tags on the remote, oldest first; local tags are replaced by
     the remote's so a locally forged or moved tag doesn't count."""
@@ -92,6 +102,5 @@ def verify(program: Program, remote: str = "origin") -> tuple[list[str], dict[st
         elif approved[rel] != current[rel]:
             problems.append(f"{rel} changed since approval {latest}")
     day_ago = datetime.now(UTC) - timedelta(days=1)
-    recent = [tag for tag in tags
-              if datetime.strptime(tag[len(TAG_PREFIX):], TAG_FORMAT).replace(tzinfo=UTC) > day_ago]
+    recent = [tag for tag in tags if tag_time(tag) > day_ago]
     return problems, {"latest_approval": latest, "approvals_last_day": recent}
