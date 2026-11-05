@@ -1,4 +1,13 @@
-# Tooling (specified, not built)
+# Tooling
+
+Status (Nov 2026): `program new`, `sync`, `approve`, `check` and `next-id`
+are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
+enforced; 3 is enforced as "an outcome follows its registration in the
+ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
+`program digest` and the `/program` skill aren't built; the debrief prompt
+in `scheduled/debrief.md` does their job. Approvals are anchored as tags
+pushed to the remote (see the README), which settles the first open
+question below for laptops.
 
 The template only works if a few things are checked mechanically rather than
 trusted. This is what to build, in order of need. Python, run with `uv`.

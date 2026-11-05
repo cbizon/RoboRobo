@@ -1,4 +1,4 @@
-# research-programs
+# RoboRobo
 
 Run a research project with an AI agent (Claude Code) that works on a
 schedule, typically overnight, while you check in once a day. Each project is
@@ -13,12 +13,16 @@ you can inspect.
 
 ## Status
 
-Draft. What exists: this README, the starting files for a new program
-(`template/`), the formats for the program's records (`schemas/`), and a
-specification of the tooling (`TOOLS.md`). What
-doesn't exist yet: the `program` command-line tool, the `/program` slash
-command, and the scheduling. Everything marked *(planned)* below describes how
-it will work once built.
+Working, with one program running on it (sequel, a granular-physics
+simulation program). Built: the `program` command (`new`, `sync`,
+`approve`, `check`, `next-id`), the starting files (`template/`), the record
+formats (`schemas/`), the scheduled prompts for the session, checker and
+debrief, and a library for judging a candidate against a baseline across
+several quantities (`roborobo.judge`). Not built yet, and marked *(planned)*
+below: checking that every number in a summary traces to a results file,
+the `/program` slash command (the debrief prompt does its job for now), and
+setting up the scheduled tasks automatically (you create them in the Code
+tab). `LOG.md` records each change and the program that prompted it.
 
 ## Words used throughout
 
@@ -68,23 +72,30 @@ confused:
 
 ## How you use it
 
-### Once: install the tool *(planned)*
+### Once: install the tool
 
 ```bash
-uv tool install <path to this repository>
+uv tool install --editable ~/Projects/experiments/research-programs
 ```
 
-This gives you the `program` command.
+This gives you the `program` command. A program written in Python can
+instead add RoboRobo as a dependency (`uv add --editable <path>`), which also
+gives its code `roborobo.judge`.
 
 ### Starting a program
 
-1. **Create its repository** *(planned)*:
+1. **Create its repository**:
 
    ```bash
-   program new ~/Projects/experiments/gene-disease-direction
+   program new ~/Projects/experiments/gene-disease-direction \
+       --name gene-disease --title "which genes cause disease by loss or gain of function" \
+       --scientist Chris --data-dir ~/Projects/experiments/gene-disease-data
    ```
 
-   This makes a new git repository containing the starting files.
+   This makes a new git repository with the starting files and a
+   `program.toml` holding the name, data folder and schedule (sessions 11 pm
+   to 5 am, checker 5:30, debrief 7, by default; edit it and run
+   `program sync`). Add a GitHub remote and push.
 
 2. **Write the direction with Claude.** Open Claude Code in the new
    repository and fill in `DIRECTION.md` together:
@@ -99,7 +110,9 @@ This gives you the `program` command.
    - what the agent may do without asking, and what it must ask about first;
    - the limits on computing time or money, in `budgets.yaml`.
 
-   Claude drafts; you decide.
+   Then `BRIEF.md`: how this program works day to day (commands to run at
+   the start of a session, where code goes, how to run the referee's tools,
+   what a fair baseline is). Claude drafts; you decide.
 
 3. **Build the referee**, also with Claude, in ordinary interactive sessions
    (not scheduled ones). It goes in `referee/`. For a program without a ready
@@ -108,19 +121,25 @@ This gives you the `program` command.
    part of it back for scoring. Check a sample yourself before trusting it.
    Scheduled sessions start only once the referee exists.
 
-4. **Approve your files** *(planned)*:
+4. **Approve your files**: commit them, then
 
    ```bash
-   program approve DIRECTION.md budgets.yaml referee/
+   program approve
    ```
 
-   This records a fingerprint (a file hash) of each in `approvals.json`. If
-   anything changes those files afterwards, including the agent,
-   `program check` (described below) fails until you approve the change.
+   This records a fingerprint (a file hash) of each of your files in
+   `approvals.json`, commits it, tags the commit `approved/<time>`, and pushes
+   the tag to GitHub. If anything changes those files afterwards, including
+   the agent, `program check` fails until you approve again. The check
+   compares against the tag on GitHub, not a local copy, so an agent that
+   rewrote `approvals.json` locally still fails; and it lists every approval
+   from the last day, so one you didn't make shows up in the morning.
 
-5. **Schedule it** *(planned)*. Set up the recurring session (a Claude Code
-   scheduled task, which runs Claude on a timer, or a job on a computing
-   cluster for heavy programs) and the morning check described below. If
+5. **Schedule it.** Create three Claude Code scheduled tasks in the Code
+   tab (session, checker, debrief), set to run only on this computer, with
+   the prompts in the program's `scheduled/` folder; its README gives the
+   times. (Heavy programs can instead run sessions as cluster jobs, as
+   miner2049er does on Sterling.) If
    you're not sure the place you picked is good enough (a laptop that may
    sleep, a small disk), have sessions fill in the optional
    `run_conditions` in their summaries and the checker assess them, and
@@ -134,20 +153,22 @@ This gives you the `program` command.
   happened. It ends by writing a plain-language summary of the session with up
   to five questions for you, each with what the agent will do by default if
   you don't answer, and its ranked proposals for what to do next.
-- **The checker reviews the session** *(planned)*. A separate session reads
+- **The checker reviews the session.** A separate session reads
   what was produced (not the agent's reasoning), tries to break each new
   claim, and records a verdict for each: holds, doubtful, or broken, with
   what would resolve the doubt. Open challenges are added to the next
   instruction, so the agent has to answer them.
-- **The rules are checked automatically.** The scheduler runs
-  `program check` before and after every session, outside the agent's control
-  *(planned)*. It confirms your files are unchanged,
-  that no record was rewritten, that each plan was written before its results,
-  that every number in the summary appears in a results file, and that the
-  budget isn't exceeded. If anything fails, the session stops and the morning
-  check tells you.
-- **Your debrief is prepared each morning** *(planned)*. A scheduled task in
-  the Claude Code app on your Mac runs `/program <name>`: it explains what was
+- **The rules are checked.** The session runs `program check` at its start
+  and end, and the checker and the debrief run it again, so a failure the
+  session didn't report still reaches you. It confirms that your files and
+  RoboRobo's are unchanged, that no ledger line was rewritten (through the
+  git history), that every record matches its schema, that outcomes follow
+  registrations, that open blockers are carried in the summary, and that
+  budgets summed from the ledger aren't exceeded. *(Planned: checking that
+  every number in a summary appears in a results file; for now the checker
+  does it.)*
+- **Your debrief is prepared each morning.** A scheduled task in the Claude
+  Code app on your Mac runs the debrief prompt: it explains what was
   tried, what happened and what it means, shows the checker's verdicts,
   recommends answers to the agent's questions, and drafts tonight's
   instruction. Then it waits. (Schedule it from the Code tab, set to run only
@@ -164,44 +185,58 @@ This gives you the `program` command.
 
 ### When you change course
 
-Edit `DIRECTION.md`, `budgets.yaml` or the referee yourself, then run
-`program approve` on what you changed.
+Edit `DIRECTION.md`, `BRIEF.md`, `budgets.yaml` or the referee yourself,
+commit, then run `program approve`.
+
+### When RoboRobo improves
+
+Update RoboRobo, then run `program sync` in each program: it re-renders the
+files RoboRobo owns (the session brief, checker brief, scheduled prompts,
+permissions). `program check` fails until you do, so no program silently
+runs on old rules.
 
 ## What lives where
 
-- **This repository is the tool.** It will provide the `program` command, the
-  record formats, the starting files, and the `/program` slash command. Each
-  program depends on one fixed release of it, recorded in the program's own
-  dependencies, so the rules don't change under a running program.
-- **Each program is its own repository.** The starting files are copied in once
-  and then belong to the program. Programs don't share a repository because
-  each one's git history is part of its audit trail (for example, proving a
-  plan was committed before its results), and so that an agent working on one
-  program can't touch another.
-- **Anything that has to be enforced is a command-line tool** (`program new`,
-  `approve`, `check`, `digest`), because a rule the agent checks on itself
-  isn't really enforced. That only holds if the agent can't run the tools
-  that are yours: the scheduler, not the agent, runs `program check`, and
-  sessions should run where the agent can't write `approvals.json` or run
-  `program approve` (a separate account, or a container). How to arrange that
-  on a laptop is an open question in `TOOLS.md`. `program digest` produces the session summary for a
-  human; the morning check and the debrief both use it. **The parts that need
-  conversation are a Claude Code slash command** (`/program`).
-- **Large data** (simulation outputs, big datasets) lives on a cluster disk or
-  in object storage; the program records where it is and a checksum.
+- **This repository is the tool**: the `program` command, the record
+  formats, the starting files, and `roborobo.judge`.
+- **Each program is its own repository**, because each one's git history is
+  part of its audit trail (a plan committed before its results) and so an
+  agent working on one program can't touch another.
+- **Every file in a program has one owner**, and `program check` enforces
+  each kind differently:
+  - **yours** (`DIRECTION.md`, `BRIEF.md`, `budgets.yaml`, `program.toml`,
+    `referee/`): fingerprinted by `program approve`;
+  - **RoboRobo's** (`CLAUDE.md`, `CHECKER.md`, `scheduled/`, `.claude/`,
+    the folder READMEs): rendered from `template/` and kept identical to the
+    rendering by `program sync`; this is how improvements reach every
+    program;
+  - **the agent's** (`PROGRAM.md`, `ledger/`, `sessions/`, `evidence/`):
+    validated against the schemas.
+- **Large data** (simulation outputs, big datasets) lives outside git, in the
+  program's data folder or on a cluster; evidence files record where, with a
+  checksum.
+- **What can't be enforced on a laptop.** Sessions run as you, so a shell
+  command can write anywhere. The agent's permissions deny editing your
+  files and RoboRobo's, pushing, tagging and approving; anything that gets
+  past them is caught by `program check` the same morning, not prevented.
 
 ## Inside a program
 
-This is what `program new` creates from `template/`:
+This is what `program new` creates:
 
 ```
 <program>/
+  program.toml          yours: name, data folder, schedule, which files are yours
   DIRECTION.md          yours: the question, scope, claim rules, acceptance bar, autonomy
+  BRIEF.md              yours: how the program works day to day
   budgets.yaml          yours: computing and spending limits
-  referee/              yours: what judges the work; the agent can run it, not edit it
-  approvals.json        fingerprints of the three above, written by `program approve`
-  PROGRAM.md            shared: the open questions, current state, next steps
-  CLAUDE.md             the agent's standing instructions for every session
+  referee/              yours: what judges the work, and referee/checker.md, the
+                        program's own checks for the checker
+  approvals.json        fingerprints of your files, written by `program approve`
+  CLAUDE.md             RoboRobo's: the agent's standing instructions for every session
+  CHECKER.md            RoboRobo's: the checker's standing instructions
+  scheduled/            RoboRobo's: prompts for the session, checker and debrief tasks
+  PROGRAM.md            the agent's: open questions, current state, next steps
   instructions/         one dated instruction per day from your debrief, plus the fallback
   ledger/               the program's records; lines are only ever added, never changed:
     experiments.jsonl     each experiment's plan (written before running) and its outcome
@@ -225,9 +260,8 @@ is better. Programs are for weeks-long work whose results you need to trust.
 
 ## Standing rules
 
-- **Your files are yours.** The agent never edits `DIRECTION.md`,
-  `budgets.yaml`, `referee/` or `approvals.json`; `program check` catches it if
-  anything does.
+- **Your files are yours, and RoboRobo's are RoboRobo's.** The agent never
+  edits either; `program check` catches it if anything does.
 - **Plan, then run.** An experiment's plan (its hypothesis, method, how the
   result will be judged, what result would show the hypothesis wrong, and its
   expected cost) is recorded before any result exists. A changed plan is a new
@@ -262,6 +296,11 @@ is better. Programs are for weeks-long work whose results you need to trust.
 
 ## Where the ideas came from
 
+- **sequel**, the first program run on RoboRobo, a granular-physics
+  simulation program. From it: the `program` command with approvals anchored
+  on GitHub, the split into general brief and program-specific `BRIEF.md`,
+  run conditions for deciding where to run, keeping the machine clean, and
+  the blocked-baseline pass rule in `roborobo.judge`.
 - **miner2049er**, an earlier nightly agent by the same author that searches a biomedical
   knowledge graph for rules predicting drug treatments, scored against hidden
   answers. From it: the daily rhythm, plain-language summaries, at most five
