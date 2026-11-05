@@ -77,6 +77,7 @@ def test_approve_then_check_passes(program, capsys):
     assert code == 0, out
     assert "latest approval: approved/" in out
     assert "approvals in the last day" in out
+    assert git(program, "rev-parse", "HEAD") == git(program, "rev-parse", "origin/main")
 
 
 def test_changed_human_file_fails(program, capsys):

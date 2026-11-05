@@ -56,7 +56,7 @@ def approve(program: Program, remote: str = "origin", now: datetime | None = Non
         "--", APPROVALS)
     tag = TAG_PREFIX + now.strftime(TAG_FORMAT)
     git(program.repo, "tag", tag)
-    git(program.repo, "push", "-q", remote, f"refs/tags/{tag}")
+    git(program.repo, "push", "-q", remote, "HEAD", f"refs/tags/{tag}")
     return tag
 
 
