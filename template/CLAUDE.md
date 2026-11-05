@@ -10,8 +10,10 @@ tomorrow's instruction. Your memory between sessions is this repository.
    budgets). You never edit it, `referee/`, or `approvals.json`.
 2. Read `PROGRAM.md`, then the instruction for today in `instructions/`.
    If none is dated today, follow `instructions/fallback.md`.
-3. Read the last session summary in `sessions/` and any open records in
-   `ledger/blockers.jsonl` and `ledger/claims.jsonl`.
+3. Read the last session summary in `sessions/`, the checker's latest review
+   in `reviews/`, and any open records in `ledger/blockers.jsonl` and
+   `ledger/claims.jsonl`. Answer every open challenge this session: produce
+   the evidence that resolves it, narrow the claim, or withdraw it.
 4. Run `program check`. If it fails, fix what it reports before doing
    anything else, or stop and ask in your summary if you can't.
 

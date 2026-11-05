@@ -49,8 +49,15 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
   from `evidence/` and the ledger, checks against the scientist's taste
   file, drafts tomorrow's instruction, and writes it to `instructions/` on
   approval.
-- **Morning check.** `program digest --check` for each registered program,
-  one line per program that needs the scientist; quiet otherwise.
+- **Checker session.** A scheduled session after each work session, with an
+  adversarial brief: read the outputs (not the agent's reasoning), attack each
+  new claim and any still-challenged one, and record `reviews/<date>.json`
+  (schema: `review.schema.json`). `program check` refuses to let a claim be
+  admitted while a challenge on it is open. Each program's `DIRECTION.md`
+  lists its known failure modes for the checker to try.
+- **Prepared debrief.** A Code-tab scheduled task on the Mac (not Cowork, whose
+  scheduled tasks run in a sandbox without the user's tools) runs
+  `/program <name>` each morning and waits for the scientist.
 
 ## Scheduling
 
@@ -78,7 +85,5 @@ Each program says in `DIRECTION.md` where its sessions run:
   message).
 - Where the shared registry of programs lives (for the morning check across
   programs).
-- Whether skeptic review of results is a separate scheduled session or part
-  of the debrief.
 - How blind human ratings are collected (a small web form, or inside the
   debrief).

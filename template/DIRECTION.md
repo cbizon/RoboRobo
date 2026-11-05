@@ -36,6 +36,13 @@ claim falls under several classes, the strictest rule applies.
 | interpretive | an empirical or descriptive claim it rests on, named | |
 | <add program-specific classes> | | |
 
+## Known ways this goes wrong
+
+<Failure modes the checker should try against every claim, for example:
+leakage from near-copies of the answer, results carried by a few
+well-studied cases, baselines not tuned the same way, descriptions that
+don't match what was run.>
+
 ## Acceptance bar
 
 <What would make the program's output good enough to use or release. Write

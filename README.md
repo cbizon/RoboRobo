@@ -37,12 +37,34 @@ it will work once built.
   accept it.
 - **Instruction**: a short note from you telling tonight's session what to
   focus on. One per day, dated.
+- **Checker**: a separate Claude session, after each work session, whose only
+  job is to try to break the claims that session made. It never saw the
+  agent's reasoning.
 - **Debrief**: your daily conversation with Claude about the last session,
-  which ends with tomorrow's instruction.
+  prepared for you each morning, which ends with tomorrow's instruction.
 - **Open question**: one of the program's research questions, listed in
   `PROGRAM.md`; it stays open until answered yes or no.
 - **Blocker**: anything stopping progress (missing data, a failing tool, a
   decision only you can make), recorded until it's dealt with.
+
+## Who judges what
+
+Three different things look at the agent's work, and they shouldn't be
+confused:
+
+- **The referee decides** whether a result counts. It is independent of the
+  agent: the agent can submit work to it but can't influence its verdict. In
+  miner2049er this is the scorer, which checks proposed rules against
+  treatments hidden from the agent.
+- **The checker attacks.** After each session it tries to break the new claims
+  (leakage, results carried by a few easy cases, unfair comparisons, a
+  description that doesn't match what was actually done). It doesn't decide
+  what's true; its challenges have to be answered, by the agent with
+  evidence or by you, before a claim is accepted.
+- **You steer.** The debrief is where you judge whether the work is going in a
+  sensible direction and set the next instruction. Your judgment there isn't
+  independent of the agent's framing, so it isn't the referee. When you do act
+  as a referee, it's through blind rating, a separate, structured task.
 
 ## How you use it
 
@@ -108,6 +130,11 @@ This gives you the `program` command.
   happened. It ends by writing a plain-language summary of the session with up
   to five questions for you, each with what the agent will do by default if
   you don't answer, and its ranked proposals for what to do next.
+- **The checker reviews the session** *(planned)*. A separate session reads
+  what was produced (not the agent's reasoning), tries to break each new
+  claim, and records a verdict for each: holds, doubtful, or broken, with
+  what would resolve the doubt. Open challenges are added to the next
+  instruction, so the agent has to answer them.
 - **The rules are checked automatically.** The scheduler runs
   `program check` before and after every session, outside the agent's control
   *(planned)*. It confirms your files are unchanged,
@@ -115,15 +142,17 @@ This gives you the `program` command.
   that every number in the summary appears in a results file, and that the
   budget isn't exceeded. If anything fails, the session stops and the morning
   check tells you.
-- **A morning check** gives you one line per program that needs you
-  ("gene-disease-direction: 3 questions") and stays quiet otherwise
-  *(planned; how it reaches you, such as a desktop notification or a
-  message, is still to be decided)*.
-- **You debrief when you have time.** In Claude Code, run
-  `/program gene-disease-direction` *(planned)*. It explains what was tried,
-  what happened, and what it means; goes through the agent's questions with
-  you; answers "why" by looking at the records; and drafts tonight's
-  instruction. When you approve it, it's saved for tonight.
+- **Your debrief is prepared each morning** *(planned)*. A scheduled task in
+  the Claude Code app on your Mac runs `/program <name>`: it explains what was
+  tried, what happened and what it means, shows the checker's verdicts,
+  recommends answers to the agent's questions, and drafts tonight's
+  instruction. Then it waits. (Schedule it from the Code tab, set to run only
+  on this computer; the app's other scheduling runs in a sandbox that can't
+  reach your tools.)
+- **You open it when you have time.** Everything is already there: reply "go
+  with your recommendations", or discuss any point; it answers "why" by
+  looking at the records. When you approve the instruction, it's saved for
+  tonight.
 - **If you skip a day**, tonight's session uses the standing fallback
   instruction (`instructions/fallback.md`): continue with the agent's own
   top-ranked proposal from last night, and use its stated default for every
@@ -176,6 +205,7 @@ This is what `program new` creates from `template/`:
     decisions.jsonl       method choices (parameters, thresholds), who made them, and why
     blockers.jsonl        anything stuck, until it's resolved or explicitly carried forward
   sessions/             one plain-language summary per session
+  reviews/              the checker's review of each session
   evidence/             the results, figures and data the records point to
 ```
 
@@ -210,6 +240,9 @@ is better. Programs are for weeks-long work whose results you need to trust.
   in a results file, or the summary is rejected.
 - **Budgets warn at 50% and 80%**, in the session summary. At 100% the agent
   stops spending and asks.
+- **Challenges get answered.** A claim with an open challenge from the checker
+  isn't accepted, and the agent must respond to the challenge in its next
+  session: evidence that resolves it, a narrower claim, or withdrawal.
 - **Pilot before spending.** Before a large experiment, the agent runs a small
   one to check that the thing it will measure actually varies.
 
@@ -228,16 +261,18 @@ is better. Programs are for weeks-long work whose results you need to trust.
 - **miner2049er**, an earlier nightly agent by the same author that searches a biomedical
   knowledge graph for rules predicting drug treatments, scored against hidden
   answers. From it: the daily rhythm, plain-language summaries, at most five
-  questions with defaults, dated instructions with a fallback, and the morning
-  check.
+  questions with defaults, dated instructions with a fallback, the checker,
+  and the lesson that the morning task should prepare the debrief rather than
+  announce that one is due.
 - **ResearchLoop** (Xia & Wang, arXiv 2605.28282): your-files-only direction,
   claims with explicit statuses, evidence rules per kind of claim, things that
   can never count as evidence, writing down what would prove a hypothesis wrong,
   closing questions as "no", and never dropping blockers. They rely on the agent
-  following instructions; here a checker enforces them.
+  following instructions; here `program check` enforces them.
 - **AutoResearchClaw** (Liu et al., arXiv 2605.20025): numbers in reports must
   match recorded results, a measuring tool the agent can't edit, pilot runs,
-  and budget warnings at 50, 80 and 100%. Its separate skeptical review of
-  results isn't part of this design yet.
+  budget warnings at 50, 80 and 100%, and a separate skeptical review of
+  results, which became the checker. miner2049er's checker is the first
+  working version.
 
 Tool details: [`TOOLS.md`](TOOLS.md).
