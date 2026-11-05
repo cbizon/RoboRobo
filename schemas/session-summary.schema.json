@@ -4,23 +4,60 @@
   "title": "Session summary (sessions/YYYY-MM-DD.json)",
   "description": "Written for a scientist who didn't watch the session. Prose fields are plain language; every number in them must appear exactly in a file under evidence/ (checked by `program check`).",
   "type": "object",
-  "required": ["date", "instruction", "headline", "experiments", "claims_changed", "questions", "proposed_directions", "budget", "open_blockers"],
+  "required": [
+    "date",
+    "instruction",
+    "headline",
+    "experiments",
+    "claims_changed",
+    "questions",
+    "proposed_directions",
+    "budget",
+    "open_blockers"
+  ],
   "properties": {
-    "date": {"type": "string", "format": "date"},
-    "instruction": {"type": "string", "description": "Path of the instruction followed (a dated file or fallback.md)"},
-    "headline": {"$ref": "_common.schema.json#/$defs/text", "description": "Two or three sentences: what the session was for and what was learned"},
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "instruction": {
+      "type": "string",
+      "description": "Path of the instruction followed (a dated file or fallback.md)"
+    },
+    "headline": {
+      "$ref": "_common.schema.json#/$defs/text",
+      "description": "Two or three sentences: what the session was for and what was learned"
+    },
     "experiments": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["experiment_id", "question", "what_was_done", "result", "takeaway"],
+        "required": [
+          "experiment_id",
+          "question",
+          "what_was_done",
+          "result",
+          "takeaway"
+        ],
         "properties": {
-          "experiment_id": {"$ref": "_common.schema.json#/$defs/id"},
-          "question": {"$ref": "_common.schema.json#/$defs/text"},
-          "what_was_done": {"$ref": "_common.schema.json#/$defs/text"},
-          "result": {"$ref": "_common.schema.json#/$defs/text"},
-          "takeaway": {"$ref": "_common.schema.json#/$defs/text"},
-          "graded_by_referee": {"type": "boolean"}
+          "experiment_id": {
+            "$ref": "_common.schema.json#/$defs/id"
+          },
+          "question": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "what_was_done": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "result": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "takeaway": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "graded_by_referee": {
+            "type": "boolean"
+          }
         },
         "additionalProperties": false
       }
@@ -29,12 +66,25 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["claim_id", "status", "plain_statement", "why"],
+        "required": [
+          "claim_id",
+          "status",
+          "plain_statement",
+          "why"
+        ],
         "properties": {
-          "claim_id": {"$ref": "_common.schema.json#/$defs/id"},
-          "status": {"type": "string"},
-          "plain_statement": {"$ref": "_common.schema.json#/$defs/text"},
-          "why": {"$ref": "_common.schema.json#/$defs/text"}
+          "claim_id": {
+            "$ref": "_common.schema.json#/$defs/id"
+          },
+          "status": {
+            "type": "string"
+          },
+          "plain_statement": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "why": {
+            "$ref": "_common.schema.json#/$defs/text"
+          }
         },
         "additionalProperties": false
       }
@@ -44,11 +94,21 @@
       "maxItems": 5,
       "items": {
         "type": "object",
-        "required": ["question", "why_it_matters", "default_if_unanswered"],
+        "required": [
+          "question",
+          "why_it_matters",
+          "default_if_unanswered"
+        ],
         "properties": {
-          "question": {"$ref": "_common.schema.json#/$defs/text"},
-          "why_it_matters": {"$ref": "_common.schema.json#/$defs/text"},
-          "default_if_unanswered": {"$ref": "_common.schema.json#/$defs/text"}
+          "question": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "why_it_matters": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "default_if_unanswered": {
+            "$ref": "_common.schema.json#/$defs/text"
+          }
         },
         "additionalProperties": false
       }
@@ -59,10 +119,17 @@
       "maxItems": 3,
       "items": {
         "type": "object",
-        "required": ["direction", "rationale"],
+        "required": [
+          "direction",
+          "rationale"
+        ],
         "properties": {
-          "direction": {"$ref": "_common.schema.json#/$defs/text"},
-          "rationale": {"$ref": "_common.schema.json#/$defs/text"}
+          "direction": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "rationale": {
+            "$ref": "_common.schema.json#/$defs/text"
+          }
         },
         "additionalProperties": false
       }
@@ -71,16 +138,135 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["spent", "limit"],
+        "required": [
+          "spent",
+          "limit"
+        ],
         "properties": {
-          "spent": {"type": "number", "minimum": 0},
-          "limit": {"type": "number", "minimum": 0}
+          "spent": {
+            "type": "number",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "number",
+            "minimum": 0
+          }
         },
         "additionalProperties": false
       }
     },
-    "open_blockers": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}},
-    "decisions_needing_you": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}}
+    "open_blockers": {
+      "type": "array",
+      "items": {
+        "$ref": "_common.schema.json#/$defs/id"
+      }
+    },
+    "decisions_needing_you": {
+      "type": "array",
+      "items": {
+        "$ref": "_common.schema.json#/$defs/id"
+      }
+    },
+    "run_conditions": {
+      "type": "object",
+      "description": "How the session actually ran, for programs testing where they run. Measured, not estimated.",
+      "required": [
+        "scheduled_start",
+        "actual_start",
+        "ended",
+        "interruptions",
+        "limits_hit"
+      ],
+      "properties": {
+        "scheduled_start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "actual_start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "interruptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "end",
+              "cause"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "cause": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "cpu_hours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cores_available": {
+          "type": "number",
+          "minimum": 0
+        },
+        "disk_free_gb": {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "number"
+            },
+            "end": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "unfinished_runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "experiment_id",
+              "reason"
+            ],
+            "properties": {
+              "experiment_id": {
+                "$ref": "_common.schema.json#/$defs/id"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "limits_hit": {
+          "$ref": "_common.schema.json#/$defs/text",
+          "description": "Where the environment limited the science, in plain words, or 'none'"
+        }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }
