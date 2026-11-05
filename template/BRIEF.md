@@ -8,6 +8,11 @@ day-to-day work; the general rules are in `CLAUDE.md`.
 
 <Anything to run before work starts, e.g. the referee's own tests.>
 
+## Background to read
+
+<Notes in `notes/` a session should read before planning, and what each is
+for.>
+
 ## Where code goes
 
 <e.g. ideas on branches named `method/<name>`, in worktrees under

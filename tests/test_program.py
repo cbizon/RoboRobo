@@ -64,6 +64,8 @@ def test_new_renders_the_template(program):
     assert "Edit(DIRECTION.md)" in settings["permissions"]["deny"]
     assert "Bash(git push:*)" in settings["permissions"]["deny"]
     assert (program / "DIRECTION.md").read_text().startswith("# Direction: demo")
+    assert "Pat's background" in (program / "notes" / "README.md").read_text()
+    assert "Edit(notes/**)" in settings["permissions"]["deny"]
 
 
 def test_check_needs_an_approval(program, capsys):

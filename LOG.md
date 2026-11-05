@@ -6,6 +6,11 @@ if it is, it goes here first and reaches the program through `program sync`.
 
 ## 2026-11-05 (from sequel)
 
+- Added `notes/`, the scientist's background, owned by the scientist and
+  read before planning. sequel's contact-handling options lived in a
+  Claude Docs page; the program's `PROGRAM.md` listed different options
+  written from memory, because sessions can only read the repository.
+
 - Built `program new`, `sync`, `approve`, `check`, `next-id`. sequel was
   set up by hand from the template and had drifted from it; nothing
   enforced its rules.

@@ -46,6 +46,7 @@ SEEDED = (
     "budgets.yaml",
     "referee/README.md",
     "referee/checker.md",
+    "notes/README.md",
     "instructions/fallback.md",
     "ledger/experiments.jsonl",
     "ledger/claims.jsonl",
@@ -53,7 +54,8 @@ SEEDED = (
     "ledger/blockers.jsonl",
 )
 
-DEFAULT_HUMAN_ONLY = ["DIRECTION.md", "BRIEF.md", "budgets.yaml", CONFIG, "referee/**"]
+DEFAULT_HUMAN_ONLY = ["DIRECTION.md", "BRIEF.md", "budgets.yaml", CONFIG, "referee/**",
+                      "notes/**"]
 
 LEDGER = {
     "experiments.jsonl": ("experiment.schema.json", "experiment_id", "E"),

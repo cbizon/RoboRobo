@@ -205,7 +205,7 @@ runs on old rules.
 - **Every file in a program has one owner**, and `program check` enforces
   each kind differently:
   - **yours** (`DIRECTION.md`, `BRIEF.md`, `budgets.yaml`, `program.toml`,
-    `referee/`): fingerprinted by `program approve`;
+    `referee/`, `notes/`): fingerprinted by `program approve`;
   - **RoboRobo's** (`CLAUDE.md`, `CHECKER.md`, `scheduled/`, `.claude/`,
     the folder READMEs): rendered from `template/` and kept identical to the
     rendering by `program sync`; this is how improvements reach every
@@ -229,6 +229,8 @@ This is what `program new` creates:
   program.toml          yours: name, data folder, schedule, which files are yours
   DIRECTION.md          yours: the question, scope, claim rules, acceptance bar, autonomy
   BRIEF.md              yours: how the program works day to day
+  notes/                yours: background the program starts from (design notes,
+                        options already thought through)
   budgets.yaml          yours: computing and spending limits
   referee/              yours: what judges the work, and referee/checker.md, the
                         program's own checks for the checker
