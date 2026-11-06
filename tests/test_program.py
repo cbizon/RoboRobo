@@ -63,6 +63,8 @@ def test_new_renders_the_template(program):
     settings = json.loads((program / ".claude" / "settings.json").read_text())
     assert "Edit(DIRECTION.md)" in settings["permissions"]["deny"]
     assert "Bash(git push:*)" in settings["permissions"]["deny"]
+    assert "Bash" in settings["permissions"]["allow"]
+    assert settings["permissions"]["additionalDirectories"][0].endswith("demo-data")
     assert (program / "DIRECTION.md").read_text().startswith("# Direction: demo")
     assert "Pat's background" in (program / "notes" / "README.md").read_text()
     assert "Edit(notes/**)" in settings["permissions"]["deny"]

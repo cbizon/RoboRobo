@@ -20,18 +20,29 @@ def fill(text: str, values: dict[str, str], source: str) -> str:
 
 
 def settings(program: Program) -> str:
-    """Claude Code permissions: the agent's file tools can't touch files it
-    doesn't own, and it can't push, tag, or approve.  These deny rules stop
-    honest mistakes; `program check` is what catches the rest (a shell
-    command can still write anywhere)."""
+    """Claude Code permissions for unattended sessions.
+
+    Scheduled runs stall on any permission prompt until someone answers it,
+    so ordinary work is allowed outright: shell commands, edits, reads and
+    web lookups, in the repository, the data folder, and RoboRobo (for the
+    schemas).  Protection comes from deny rules, which hold in every
+    permission mode: the agent's file tools can't touch files it doesn't
+    own, and it can't push, tag, rewrite history, or approve.  A shell
+    command can still write anywhere; `program check` and the checker are
+    what catch that."""
     protected = [*program.human_only, APPROVALS,
                  *(p for p in TEMPLATE_OWNED if p != ".claude/settings.json")]
     deny = [f"{tool}({path})" for path in protected for tool in ("Edit", "Write")]
     deny += ["Edit(.claude/**)", "Write(.claude/**)",
              "Bash(git push:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)",
              "Bash(git rebase:*)", "Bash(git reset --hard:*)",
-             "Bash(program approve:*)", "Bash(uv run program approve:*)"]
-    return json.dumps({"permissions": {"deny": deny}}, indent=2) + "\n"
+             "Bash(program approve:*)", "Bash(uv run program approve:*)",
+             "Bash(uv run --project * program approve:*)"]
+    allow = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]
+    extra = [str(Path(program.data_dir).expanduser().resolve()), str(ROOT)]
+    return json.dumps({"permissions": {"allow": allow, "deny": deny,
+                                       "additionalDirectories": extra}},
+                      indent=2) + "\n"
 
 
 def rendered(program: Program, path: str) -> str:
