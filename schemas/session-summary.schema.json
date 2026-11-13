@@ -24,6 +24,40 @@
       "type": "string",
       "description": "Path of the instruction followed (a dated file or fallback.md)"
     },
+    "answers": {
+      "type": "array",
+      "description": "One entry per item under 'Asked' in the instruction, in order. Empty on a fallback night.",
+      "items": {
+        "type": "object",
+        "required": [
+          "asked",
+          "status",
+          "answer"
+        ],
+        "properties": {
+          "asked": {
+            "$ref": "_common.schema.json#/$defs/text",
+            "description": "The item, copied word for word from the instruction"
+          },
+          "status": {
+            "enum": [
+              "answered",
+              "partly",
+              "not_answered"
+            ]
+          },
+          "answer": {
+            "$ref": "_common.schema.json#/$defs/text",
+            "description": "The reply in the item's own terms, before any explanation"
+          },
+          "departures": {
+            "$ref": "_common.schema.json#/$defs/text",
+            "description": "Where what was done differs from what was asked"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "headline": {
       "$ref": "_common.schema.json#/$defs/text",
       "description": "Two or three sentences: what the session was for and what was learned"
