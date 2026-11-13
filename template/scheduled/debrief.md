@@ -49,7 +49,19 @@ about a line goes in its own section, in one place.
 7. A draft of tonight's instruction, in the format below.
 
 Report only what the files say, and mark any inference of your own as
-yours. Then discuss.
+yours.
+
+Then run `uv run --project {{roborobo}} program map`. It writes the program
+map, a page of the lines of investigation against nights, to the path it
+prints. Show {{scientist}} the page: publish it as an artifact if you can,
+updating the one from earlier days instead of making a new one. The lines
+in your debrief are the lines on the map, under the same names.
+
+Then discuss. When {{scientist}} decides something about a line (opens one,
+pauses, drops or closes one, or settles a question in it), append the
+record to ledger/lines.jsonl with `by: "human"`: a `note` for the session's
+date giving the decision in {{scientist}}'s words, and an `update` if the
+status changed. Commit it with the instruction.
 
 ## The instruction
 

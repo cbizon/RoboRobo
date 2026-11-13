@@ -11,6 +11,8 @@
     "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
     "by": {"$ref": "_common.schema.json#/$defs/actor"},
     "rq_id": {"type": "string", "description": "Research question in PROGRAM.md"},
+    "line_id": {"$ref": "_common.schema.json#/$defs/id", "description": "The line of investigation this experiment belongs to (ledger/lines.jsonl)"},
+    "title": {"type": "string", "minLength": 3, "maxLength": 90, "description": "A few plain words naming the experiment, for the program map"},
     "supersedes": {"$ref": "_common.schema.json#/$defs/id"},
     "hypothesis": {"$ref": "_common.schema.json#/$defs/text"},
     "method": {"$ref": "_common.schema.json#/$defs/text"},

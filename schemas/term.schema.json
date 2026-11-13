@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/term.schema.json",
+  "title": "Term (ledger/terms.jsonl)",
+  "description": "A name the program's records use for a method, condition or check. A later record with the same term_id replaces the definition. `program map` links every use of the term or its aliases to the definition.",
+  "type": "object",
+  "required": ["term_id", "at", "by", "term", "definition"],
+  "properties": {
+    "term_id": {"$ref": "_common.schema.json#/$defs/id", "description": "T0001, T0002, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "term": {"type": "string", "minLength": 2, "maxLength": 40},
+    "definition": {"$ref": "_common.schema.json#/$defs/text"},
+    "aliases": {"type": "array", "items": {"type": "string", "minLength": 2}, "description": "Other spellings and forms to link, for example plurals"}
+  },
+  "additionalProperties": false
+}

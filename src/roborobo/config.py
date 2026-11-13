@@ -52,6 +52,8 @@ SEEDED = (
     "ledger/claims.jsonl",
     "ledger/decisions.jsonl",
     "ledger/blockers.jsonl",
+    "ledger/lines.jsonl",
+    "ledger/terms.jsonl",
 )
 
 DEFAULT_HUMAN_ONLY = ["DIRECTION.md", "BRIEF.md", "budgets.yaml", CONFIG, "referee/**",
@@ -62,6 +64,8 @@ LEDGER = {
     "claims.jsonl": ("claim.schema.json", "claim_id", "C"),
     "decisions.jsonl": ("decision.schema.json", "decision_id", "D"),
     "blockers.jsonl": ("blocker.schema.json", "blocker_id", "B"),
+    "lines.jsonl": ("line.schema.json", "line_id", "L"),
+    "terms.jsonl": ("term.schema.json", "term_id", "T"),
 }
 
 

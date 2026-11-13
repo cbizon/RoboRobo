@@ -220,6 +220,104 @@ def test_summary_answers_validate(program, capsys):
     assert code == 1 and "answers/0/status" in out
 
 
+def line(lid, record="open", **extra):
+    base = {"record": record, "line_id": lid, "at": "2026-11-05T23:00:00+00:00", "by": "human"}
+    if record == "open":
+        base |= {"name": "Heater", "question": "Does the heater cause the drift?"}
+    return base | extra
+
+
+def test_experiments_belong_to_a_line_once_lines_exist(program, capsys):
+    run("approve", "--repo", program)
+    append(program, "experiments.jsonl", registration("E0001", at="2026-11-04T23:10:00+00:00"))
+    append(program, "lines.jsonl", line("L0001"))
+    append(program, "experiments.jsonl", registration("E0002", line_id="L0001", title="Heater off"))
+    assert check(program, capsys)[0] == 0
+    append(program, "experiments.jsonl", registration("E0003"))
+    append(program, "experiments.jsonl", registration("E0004", line_id="L0009"))
+    append(program, "lines.jsonl", line("L0002", "note", night="2026-11-05",
+                                        text="Nothing was opened first."))
+    code, out = check(program, capsys)
+    assert code == 1
+    assert "E0003 has no line_id" in out
+    assert "E0004 names L0009, which isn't a line" in out
+    assert "L0002 has a note before it is opened" in out
+
+
+def test_sync_creates_new_ledger_files(program, capsys):
+    run("approve", "--repo", program)
+    (program / "ledger" / "lines.jsonl").unlink()
+    code, out = check(program, capsys)
+    assert code == 1 and "ledger/lines.jsonl is missing" in out
+    assert run("sync", "--repo", program) == 0
+    assert check(program, capsys)[0] == 0
+
+
+def test_map_is_built_from_the_records(program, tmp_path, capsys):
+    from roborobo import config, mapview
+    append(program, "experiments.jsonl", registration("E0001", at="2026-11-04T23:10:00+00:00"))
+    append(program, "lines.jsonl", line("L0001", experiments=[
+        {"experiment_id": "E0001", "title": "Heater on, as a baseline"}]))
+    append(program, "lines.jsonl", line("L0002", by="agent", name="Spare heater", parent="L0001",
+                                        question="Does the spare heater drift too?",
+                                        reason="One heater is one sample."))
+    append(program, "experiments.jsonl", registration("E0002", line_id="L0002", title="Spare heater on"))
+    append(program, "lines.jsonl", line("L0001", "note", by="agent", night="2026-11-05",
+                                        text="The drift stops with the heater off."))
+    append(program, "lines.jsonl", line("L0001", "update", by="agent", feeds=["L0002"],
+                                        state="The heater causes the drift at all three settings.",
+                                        artifacts=[{"kind": "evidence", "path": "E0001-results.json"}]))
+    append(program, "lines.jsonl", line("L0002", "note", night="2026-11-06", waiting=True,
+                                        text="Waiting for the spare to arrive."))
+    append(program, "terms.jsonl", {"term_id": "T0001", "at": "2026-11-05T23:00:00+00:00",
+                                    "by": "agent", "term": "Drift",
+                                    "definition": "A slow change in the reading.",
+                                    "aliases": ["drifts"]})
+    summary = {"date": "2026-11-05", "instruction": "instructions/fallback.md",
+               "answers": [{"asked": "Does turning the heater off stop the drift?",
+                            "status": "answered", "answer": "Yes, at all three settings."}],
+               "headline": "The heater causes the drift.",
+               "experiments": [{"experiment_id": "E0001", "question": "Does the heater matter?",
+                                "what_was_done": "Ran with it on and off.",
+                                "result": "The drift stopped.", "takeaway": "It is the heater."}],
+               "claims_changed": [], "questions": [],
+               "proposed_directions": [{"direction": "Repeat with the spare heater.",
+                                        "rationale": "One heater is one sample."}],
+               "budget": {}, "open_blockers": []}
+    (program / "sessions" / "2026-11-05.json").write_text(json.dumps(summary))
+    review = {"date": "2026-11-05", "reviewer_model": "test", "summary": "One result, checked.",
+              "reviews": [{"claim_id": "E0001", "plain_claim": "The heater causes the drift.",
+                           "verdict": "doubtful", "what_would_resolve": "A second heater.",
+                           "attacks": [{"check": "other", "what_was_done": "Read the result file.",
+                                        "finding": "Only one heater was tried."}]}],
+              "answers": [{"asked": "Does turning the heater off stop the drift?",
+                           "verdict": "answered", "finding": "The runs match the answer."}],
+              "run_conditions": {"verdict": "strained", "assessment": "The disk was nearly full."}}
+    (program / "reviews" / "2026-11-05.json").write_text(json.dumps(review))
+
+    model = mapview.build(config.load(program))
+    assert [n["d"] for n in model["nights"]] == ["2026-11-05", "2026-11-06"]
+    assert model["nights"][0]["run"] == "warn" and model["nights"][0]["fallback"]
+    heater, spare = model["lines"]
+    assert (heater["name"], heater["by"], heater["depth"], heater["feeds"]) == ("Heater", "Pat", 0, ["L0002"])
+    assert heater["nights"]["2026-11-05"] == {
+        "k": "doubtful", "e": ["E0001"],
+        "notes": [{"t": "The drift stops with the heater off.", "by": "the agent"}]}
+    assert heater["arts"] == [["evidence", "E0001-results.json"]]
+    assert (spare["parent"], spare["depth"], spare["by"]) == ("L0001", 1, "the agent")
+    assert spare["nights"]["2026-11-06"]["k"] == "waiting" and spare["other"] == ["E0002"]
+    assert model["exps"]["E0001"] == {"title": "Heater on, as a baseline", "status": None,
+                                      "chk": "doubtful"}
+    assert model["asks"]["items"][0]["verdict"] == "answered"
+    assert model["terms"][0]["aliases"] == ["drifts"] and model["unassigned"] == []
+
+    out = tmp_path / "page" / "map.html"
+    assert run("map", "--repo", program, "--out", out) == 0
+    page = out.read_text()
+    assert "<title>Demo program map</title>" in page and "Spare heater" in page
+    assert "/*DATA*/" not in page
+
+
 def test_next_id(program, capsys):
     run("next-id", "E", "--repo", program)
     assert capsys.readouterr().out.strip() == "E0001"
