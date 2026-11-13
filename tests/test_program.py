@@ -201,6 +201,25 @@ def test_open_blockers_must_be_in_the_summary(program, capsys):
     assert code == 1 and "doesn't list open blockers B0001" in out
 
 
+def test_summary_answers_validate(program, capsys):
+    run("approve", "--repo", program)
+    summary = {"date": "2026-11-05", "instruction": "instructions/2026-11-05.md",
+               "answers": [{"asked": "Does turning the heater off stop the drift?",
+                            "status": "answered", "answer": "Yes, at all three settings."}],
+               "headline": "The heater causes the drift.", "experiments": [],
+               "claims_changed": [], "questions": [],
+               "proposed_directions": [{"direction": "Repeat with the spare heater.",
+                                        "rationale": "One heater is one sample."}],
+               "budget": {}, "open_blockers": []}
+    path = program / "sessions" / "2026-11-05.json"
+    path.write_text(json.dumps(summary))
+    assert check(program, capsys)[0] == 0
+    summary["answers"][0]["status"] = "reframed"
+    path.write_text(json.dumps(summary))
+    code, out = check(program, capsys)
+    assert code == 1 and "answers/0/status" in out
+
+
 def test_next_id(program, capsys):
     run("next-id", "E", "--repo", program)
     assert capsys.readouterr().out.strip() == "E0001"

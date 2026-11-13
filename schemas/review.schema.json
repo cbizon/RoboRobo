@@ -93,6 +93,35 @@
         "additionalProperties": false
       }
     },
+    "answers": {
+      "type": "array",
+      "description": "Whether the session answered each item under 'Asked' in the instruction, as it was worded.",
+      "items": {
+        "type": "object",
+        "required": [
+          "asked",
+          "verdict",
+          "finding"
+        ],
+        "properties": {
+          "asked": {
+            "$ref": "_common.schema.json#/$defs/text"
+          },
+          "verdict": {
+            "enum": [
+              "answered",
+              "partly",
+              "not_answered",
+              "different_question"
+            ]
+          },
+          "finding": {
+            "$ref": "_common.schema.json#/$defs/text"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "run_conditions": {
       "type": "object",
       "description": "The checker's assessment of how the session's environment worked, when the program records run conditions.",
