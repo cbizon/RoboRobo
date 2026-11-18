@@ -15,7 +15,7 @@ you can inspect.
 
 Working, with one program running on it (sequel, a granular-physics
 simulation program). Built: the `program` command (`new`, `sync`,
-`approve`, `check`, `next-id`), the starting files (`template/`), the record
+`approve`, `check`, `map`, `next-id`), the starting files (`template/`), the record
 formats (`schemas/`), the scheduled prompts for the session, checker and
 debrief, and a library for judging a candidate against a baseline across
 several quantities (`roborobo.judge`). Not built yet, and marked *(planned)*
@@ -174,6 +174,12 @@ gives its code `roborobo.judge`.
   instruction. Then it waits. (Schedule it from the Code tab, set to run only
   on this computer; the app's other scheduling runs in a sandbox that can't
   reach your tools.)
+- **The program map is rebuilt.** `program map` writes one page from the
+  records: each line of investigation as a row, each night as a column, a
+  mark coloured by the checker's verdict, and a card per line with its
+  question, where it stands, its history and its artifacts. Unlike the
+  debrief it isn't rewritten each day; it is the same picture with last
+  night added.
 - **You open it when you have time.** Everything is already there: reply "go
   with your recommendations", or discuss any point; it answers "why" by
   looking at the records. When you approve the instruction, it's saved for
@@ -245,6 +251,8 @@ This is what `program new` creates:
     claims.jsonl          proposed claims and whether they were accepted
     decisions.jsonl       method choices (parameters, thresholds), who made them, and why
     blockers.jsonl        anything stuck, until it's resolved or explicitly carried forward
+    lines.jsonl           lines of investigation: who opened each, where it stands, a note per night
+    terms.jsonl           the names the records use, with definitions
   sessions/             one plain-language summary per session
   reviews/              the checker's review of each session
   evidence/             the results, figures and data the records point to

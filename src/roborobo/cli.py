@@ -4,7 +4,8 @@
     program sync      [--repo DIR]   re-render template-owned files
     program approve   [--repo DIR]   record the scientist's approval (human only)
     program check     [--repo DIR]   fail loudly if a rule didn't hold
-    program next-id E|C|D|B [--repo DIR]
+    program map       [--repo DIR]   write the program map, an HTML page
+    program next-id E|C|D|B|L|T [--repo DIR]
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from roborobo import config, render
+from roborobo import config, mapview, render
 from roborobo.approvals import approve, verify
 from roborobo.config import CONFIG
 from roborobo.gitutil import git
@@ -99,6 +100,11 @@ def cmd_check(args) -> int:
     return 0
 
 
+def cmd_map(args) -> int:
+    print(mapview.write(config.load(args.repo), args.out, args.nights))
+    return 0
+
+
 def cmd_next_id(args) -> int:
     print(next_id(config.load(args.repo), args.letter))
     return 0
@@ -126,8 +132,15 @@ def main(argv=None) -> None:
         if name in ("approve", "check"):
             p.add_argument("--remote", default="origin")
         p.set_defaults(func=func)
+    pmap = sub.add_parser("map", help="write the program map, an HTML page built from the records")
+    pmap.add_argument("--repo", type=Path, default=Path.cwd())
+    pmap.add_argument("--out", type=Path, default=None,
+                      help="where to write it (default: <data_dir>/map/index.html)")
+    pmap.add_argument("--nights", type=int, default=14,
+                      help="how many of the latest nights the map shows as columns")
+    pmap.set_defaults(func=cmd_map)
     nid = sub.add_parser("next-id", help="next free ledger id")
-    nid.add_argument("letter", choices=["E", "C", "D", "B"])
+    nid.add_argument("letter", choices=["E", "C", "D", "B", "L", "T"])
     nid.add_argument("--repo", type=Path, default=Path.cwd())
     nid.set_defaults(func=cmd_next_id)
     args = ap.parse_args(argv)

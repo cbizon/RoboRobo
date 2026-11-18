@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/line.schema.json",
+  "title": "Line of investigation (ledger/lines.jsonl)",
+  "description": "One thread of the program's work. An `open` record starts a line; `update` records change where it stands (the latest value of each field wins); `note` records say what happened to it on one night. `program map` builds the scientist's page from these.",
+  "type": "object",
+  "required": ["record", "line_id", "at", "by"],
+  "properties": {
+    "record": {"enum": ["open", "update", "note"]},
+    "line_id": {"$ref": "_common.schema.json#/$defs/id", "description": "L0001, L0002, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor", "description": "Who opened the line, changed it or made the decision the note records"},
+    "name": {"type": "string", "minLength": 2, "maxLength": 40},
+    "question": {"$ref": "_common.schema.json#/$defs/text", "description": "What the line is for, in the scientist's words where the scientist asked it"},
+    "question_source": {"type": "string", "minLength": 1, "description": "Where the question's wording comes from"},
+    "reason": {"$ref": "_common.schema.json#/$defs/text", "description": "Why the line was opened, for a line the agent opened"},
+    "parent": {"$ref": "_common.schema.json#/$defs/id", "description": "The line this one branched from"},
+    "night": {"type": "string", "format": "date", "description": "The session date a note is about, or the night an open or update belongs to"},
+    "status": {"enum": ["active", "paused", "closed", "dropped"]},
+    "state": {"$ref": "_common.schema.json#/$defs/text", "description": "Where the line stands now, for someone who reads nothing else"},
+    "feeds": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}, "description": "Lines that use this line's result"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {"type": "string", "minLength": 1, "description": "For example: code branch, evidence, design, plan, figure"},
+          "path": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "experiments": {
+      "type": "array",
+      "description": "Experiments placed in this line by this record: ones registered before lines existed, or moved here. A registration's own line_id is the usual way.",
+      "items": {
+        "type": "object",
+        "required": ["experiment_id"],
+        "properties": {
+          "experiment_id": {"$ref": "_common.schema.json#/$defs/id"},
+          "title": {"type": "string", "minLength": 3, "maxLength": 90}
+        },
+        "additionalProperties": false
+      }
+    },
+    "text": {"$ref": "_common.schema.json#/$defs/text", "description": "A note: what happened to the line that night, in two or three plain sentences"},
+    "waiting": {"type": "boolean", "description": "A note: the line can't move without the scientist"},
+    "planned": {"type": "boolean", "description": "A note: work planned for that night, not yet done"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"record": {"const": "open"}}},
+      "then": {"required": ["name", "question"]}
+    },
+    {
+      "if": {"properties": {"record": {"const": "note"}}},
+      "then": {"required": ["night", "text"]}
+    }
+  ],
+  "additionalProperties": false
+}

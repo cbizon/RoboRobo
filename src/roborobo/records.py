@@ -94,6 +94,7 @@ def ledger_consistency(records: dict[str, list[dict]]) -> list[str]:
                             if eid not in seen else f"{eid} has a second outcome")
         else:
             seen[eid] = "done"
+    problems += line_consistency(records, seen)
     for filename, id_field, first in (("claims.jsonl", "claim_id", "planned"),
                                       ("blockers.jsonl", "blocker_id", "open")):
         started = set()
@@ -108,6 +109,41 @@ def ledger_consistency(records: dict[str, list[dict]]) -> list[str]:
             problems.append(f"{record['decision_id']} supersedes {record['supersedes']}, "
                             "which isn't recorded earlier")
         decided.add(record["decision_id"])
+    return problems
+
+
+def line_consistency(records: dict[str, list[dict]], registered: dict[str, str]) -> list[str]:
+    """Lines are opened once, before anything refers to them, and once the
+    program has lines every new experiment belongs to one."""
+    problems = []
+    line_records = records.get("lines.jsonl", [])
+    opened: set[str] = set()
+    for record in line_records:
+        lid = record["line_id"]
+        if record["record"] == "open":
+            if lid in opened:
+                problems.append(f"{lid} is opened twice")
+            opened.add(lid)
+        elif lid not in opened:
+            problems.append(f"{lid} has a {record['record']} before it is opened")
+        for placed in record.get("experiments", []):
+            if placed["experiment_id"] not in registered:
+                problems.append(f"{lid} places {placed['experiment_id']}, which isn't registered")
+    for record in line_records:
+        for other in [record.get("parent"), *record.get("feeds", [])]:
+            if other and other not in opened:
+                problems.append(f"{record['line_id']} refers to {other}, which isn't a line")
+    if line_records:
+        since = min(datetime.fromisoformat(r["at"]) for r in line_records)
+        for record in records.get("experiments.jsonl", []):
+            if record["record"] != "registration" or datetime.fromisoformat(record["at"]) < since:
+                continue
+            if "line_id" not in record:
+                problems.append(f"{record['experiment_id']} has no line_id; every experiment "
+                                "belongs to a line of investigation")
+            elif record["line_id"] not in opened:
+                problems.append(f"{record['experiment_id']} names {record['line_id']}, "
+                                "which isn't a line")
     return problems
 
 
@@ -176,4 +212,4 @@ def next_id(program: Program, letter: str) -> str:
             numbers = [int(json.loads(line)[id_field][1:])
                        for line in path.read_text().splitlines() if line.strip()]
             return f"{letter}{max(numbers, default=0) + 1:04d}"
-    raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B")
+    raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B, L, T")

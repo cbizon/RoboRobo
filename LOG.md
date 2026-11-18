@@ -6,6 +6,27 @@ if it is, it goes here first and reaches the program through `program sync`.
 
 ## 2026-11-13 (from sequel)
 
+- Added lines of investigation (`ledger/lines.jsonl`), terms
+  (`ledger/terms.jsonl`) and `program map`, which builds one HTML page
+  from the records: lines against nights, a card per line, and a glossary
+  linked from every use of a term. The morning debrief read as a long
+  linear narrative rewritten from scratch each day; the scientist wanted
+  a standing picture that changes a little each night.
+- The page is assembled by code and contains no prose of its own. The
+  agent writes a `state` sentence per line and a `note` per line per
+  night, the checker reads them like any other claim, and the debrief
+  records the scientist's decisions as notes `by: "human"`.
+- A mark's colour is the checker's worst verdict on that line's
+  experiments that night. This is deliberate and has a known gap: a night
+  whose experiments hold but which answered the wrong question shows as
+  "holds". The `answers` verdicts cover that.
+- Every experiment belongs to one line, enforced by `program check` for
+  registrations made after a program's first line record. Earlier
+  experiments are placed by a line record's `experiments` list, since
+  registrations can't be edited. No merges: a line `feeds` another.
+- Who opened a line is recorded, and a line the agent opens needs a
+  reason. In sequel four of twelve lines were the agent's.
+
 - Instructions now have two sections: `Asked`, the scientist's requests in
   the scientist's own words, and `Details`, the debrief's elaboration,
   which may add to a request but not narrow it. In sequel the scientist

@@ -20,7 +20,8 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program approve <path>...` | human only | Record the SHA-256 of `DIRECTION.md`, `budgets.yaml`, or files under `referee/` in `approvals.json`. |
 | `program check` | agent, every session start and end; scheduler | Fail loudly on anything below. |
 | `program digest [--check]` | debrief skill; morning check | Render the latest session summary for a human, or print one line saying whether the scientist is needed. |
-| `program next-id <E\|C\|D\|B>` | agent | Next free ledger id, so records don't collide. |
+| `program map` | anyone | Write the program map, an HTML page built from the records: lines of investigation against nights, a card per line, a glossary. Default path `<data_dir>/map/index.html`; `--out` and `--nights` change where and how many nights. |
+| `program next-id <E\|C\|D\|B\|L\|T>` | agent | Next free ledger id, so records don't collide. |
 
 ### What `program check` enforces
 
