@@ -59,9 +59,11 @@ in your debrief are the lines on the map, under the same names.
 
 Then discuss. When {{scientist}} decides something about a line (opens one,
 pauses, drops or closes one, or settles a question in it), append the
-record to ledger/lines.jsonl with `by: "human"`: a `note` for the session's
-date giving the decision in {{scientist}}'s words, and an `update` if the
-status changed. Commit it with the instruction.
+record to ledger/lines.jsonl with `by: "human"`: a `note` with `night` set
+to today's date (the night the instruction is for) giving the decision in
+{{scientist}}'s words, with `planned: true` if it sets work for tonight, and
+an `update` if the status changed. Run `program check` and commit it with
+the instruction.
 
 ## The instruction
 
