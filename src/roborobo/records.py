@@ -169,13 +169,19 @@ def documents(program: Program, folder: str, schema: str) -> tuple[list[tuple[st
 
 
 def blockers_carried(records: dict[str, list[dict]], summaries: list[tuple[str, dict]]) -> list[str]:
+    """Every open blocker is listed by the latest night's summaries: by the
+    one summary of a whole-program session, or by at least one of the
+    night's line summaries."""
     if not summaries:
         return []
-    rel, summary = summaries[-1]
+    night = max(summary["date"] for _, summary in summaries)
+    tonight = [(rel, summary) for rel, summary in summaries if summary["date"] == night]
+    listed = {bid for _, summary in tonight for bid in summary.get("open_blockers", [])}
     still_open = {bid for bid, r in latest(records.get("blockers.jsonl", []), "blocker_id").items()
                   if r["status"] in ("open", "escalated")}
-    missing = sorted(still_open - set(summary.get("open_blockers", [])))
-    return [f"{rel} doesn't list open blockers {', '.join(missing)}"] if missing else []
+    missing = sorted(still_open - listed)
+    where = " or ".join(rel for rel, _ in tonight)
+    return [f"{where} doesn't list open blockers {', '.join(missing)}"] if missing else []
 
 
 def budgets(program: Program, records: dict[str, list[dict]],

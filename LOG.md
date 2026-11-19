@@ -4,6 +4,39 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-18 (from sequel)
+
+- Nights run one line of investigation at a time (`program run-night`).
+  sequel had 18 lines and one overnight session held all of them, which
+  tangled them and produced one large morning review. Each line now gets
+  its own agent run with only its section of the instruction and its own
+  memory (`lines/L0013/progress.md`), then its own checker run, which
+  never sees the worker's reasoning. Phase 1 of `docs/always-on.md`.
+- Only lines the night's instruction has a section for run, plus lines
+  whose latest review has a doubtful or broken verdict. A day without an
+  instruction runs only those; `instructions/fallback.md` is no longer
+  seeded. Lines the agent opens start `proposed` and don't run until the
+  scientist makes them active.
+- Lines run one after another and commit on `main`, as sessions did. No
+  branch per line yet: sequel's code is already on `method/*` branches
+  shared across lines, so a line branch would hold only records, and with
+  no concurrency there is nothing for it to isolate. It comes back when
+  lines run at the same time.
+- The runner is started by launchd (`scheduled/run-night.plist`) and runs
+  the agent as `claude -p`, configurable as `[runs] agent` in
+  `program.toml`. The Code tab's session and checker tasks are retired
+  (`program sync` deletes their prompts); their threads were hard to
+  browse. The debrief task stays until the dashboard replaces it.
+- Fail loudly: a run that fails, times out or writes no summary is
+  reported in `<data_dir>/logs/<night>/night.md` and the night goes on; a
+  run that leaves the repository dirty or `program check` failing stops
+  the night, since the next line would start from that state. An
+  instruction with no line sections is reported, not ignored.
+- Summaries and reviews are per line run (`sessions/YYYY-MM-DD-L0013.json`,
+  with `line_id`); the map and the blocker check read all of a night's.
+- `[schedule] checker` is no longer used; `checker_minutes` is now the
+  limit of each line's checker run.
+
 ## 2026-11-13 (from sequel)
 
 - Added lines of investigation (`ledger/lines.jsonl`), terms

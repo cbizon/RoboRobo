@@ -1,7 +1,7 @@
 # Tooling
 
-Status (Nov 2026): `program new`, `sync`, `approve`, `check` and `next-id`
-are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
+Status (Nov 2026): `program new`, `sync`, `approve`, `check`, `map`,
+`next-id` and `run-night` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
 enforced; 3 is enforced as "an outcome follows its registration in the
 ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
 `program digest` and the `/program` skill aren't built; the debrief prompt
@@ -22,6 +22,7 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program digest [--check]` | debrief skill; morning check | Render the latest session summary for a human, or print one line saying whether the scientist is needed. |
 | `program map` | anyone | Write the program map, an HTML page built from the records: lines of investigation against nights, a card per line, a glossary. Default path `<data_dir>/map/index.html`; `--out` and `--nights` change where and how many nights. |
 | `program next-id <E\|C\|D\|B\|L\|T>` | agent | Next free ledger id, so records don't collide. |
+| `program run-night` | launchd, each evening; human, to run a line now | Run the lines the night's instruction has a section for (and lines with open challenges), one at a time, each followed by the checker. `--dry-run` says which and why; `--line` runs only the named lines; `--night` sets the date. Reports to `<data_dir>/logs/<night>/night.md`. |
 
 ### What `program check` enforces
 
@@ -47,8 +48,8 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 6. **Budgets.** Sum `cost_actual` by resource and period against
    `budgets.yaml`; report 50% / 80% crossings; fail if a registration would
    exceed 100%.
-7. **Blockers are conserved.** Every open blocker is listed in the latest
-   session summary's `open_blockers`.
+7. **Blockers are conserved.** Every open blocker is listed in the
+   `open_blockers` of at least one of the latest night's summaries.
 8. **The session summary is complete** and has at most five questions.
 
 ## Skills

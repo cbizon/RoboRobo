@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://renci.org/research-programs/schemas/session-summary.schema.json",
-  "title": "Session summary (sessions/YYYY-MM-DD.json)",
+  "title": "Session summary (sessions/YYYY-MM-DD.json, or sessions/YYYY-MM-DD-L0001.json for one line's run)",
   "description": "Written for a scientist who didn't watch the session. Prose fields are plain language; every number in them must appear exactly in a file under evidence/ (checked by `program check`).",
   "type": "object",
   "required": [
@@ -19,6 +19,10 @@
     "date": {
       "type": "string",
       "format": "date"
+    },
+    "line_id": {
+      "$ref": "_common.schema.json#/$defs/id",
+      "description": "The line this run was for, when a night runs one line at a time"
     },
     "instruction": {
       "type": "string",

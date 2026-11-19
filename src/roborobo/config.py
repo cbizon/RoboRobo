@@ -28,14 +28,22 @@ TEMPLATE_OWNED = (
     "CHECKER.md",
     ".claude/settings.json",
     "scheduled/README.md",
-    "scheduled/session.md",
-    "scheduled/checker.md",
+    "scheduled/line.md",
+    "scheduled/line-checker.md",
     "scheduled/debrief.md",
+    "scheduled/run-night.plist",
     "evidence/README.md",
     "instructions/README.md",
     "ledger/README.md",
+    "lines/README.md",
     "reviews/README.md",
     "sessions/README.md",
+)
+
+# Template-owned files RoboRobo no longer renders; `program sync` removes them.
+RETIRED = (
+    "scheduled/session.md",
+    "scheduled/checker.md",
 )
 
 # Copied from template/ once, by `program new`, then owned by someone else.
@@ -47,7 +55,6 @@ SEEDED = (
     "referee/README.md",
     "referee/checker.md",
     "notes/README.md",
-    "instructions/fallback.md",
     "ledger/experiments.jsonl",
     "ledger/claims.jsonl",
     "ledger/decisions.jsonl",
@@ -79,10 +86,14 @@ class Program:
     timezone: str
     schedule: dict[str, str]
     human_only: list[str] = field(default_factory=lambda: list(DEFAULT_HUMAN_ONLY))
+    runs: dict = field(default_factory=lambda: dict(DEFAULT_RUNS))
 
     def values(self, roborobo: Path) -> dict[str, str]:
         """Placeholder values for rendering the template."""
+        start_hour, start_minute = self.schedule["session_start"].split(":")
         return {
+            "session_start_hour": str(int(start_hour)),
+            "session_start_minute": str(int(start_minute)),
             "name": self.name,
             "title": self.title,
             "scientist": self.scientist,
@@ -106,7 +117,12 @@ def tilde(path: Path) -> str:
     return "~/" + str(path.relative_to(home)) if path.is_relative_to(home) else str(path)
 
 
-SCHEDULE_KEYS = ("session_start", "session_end", "checker", "checker_minutes", "debrief")
+SCHEDULE_KEYS = ("session_start", "session_end", "checker_minutes", "debrief")
+
+# How `program run-night` runs each line: the agent command (the prompt is
+# appended as its last argument) and the time limit of one line's worker
+# run, in minutes.  The checker's limit is [schedule] checker_minutes.
+DEFAULT_RUNS = {"agent": ["claude", "-p"], "worker_minutes": 60}
 
 
 def load(repo: Path) -> Program:
@@ -129,6 +145,7 @@ def load(repo: Path) -> Program:
         timezone=program.get("timezone", "America/New_York"),
         schedule=schedule,
         human_only=data.get("files", {}).get("human_only", list(DEFAULT_HUMAN_ONLY)),
+        runs=DEFAULT_RUNS | data.get("runs", {}),
     )
 
 

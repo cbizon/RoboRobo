@@ -15,19 +15,24 @@ you can inspect.
 
 Working, with one program running on it (sequel, a granular-physics
 simulation program). Built: the `program` command (`new`, `sync`,
-`approve`, `check`, `map`, `next-id`), the starting files (`template/`), the record
-formats (`schemas/`), the scheduled prompts for the session, checker and
-debrief, and a library for judging a candidate against a baseline across
-several quantities (`roborobo.judge`). Not built yet, and marked *(planned)*
-below: checking that every number in a summary traces to a results file,
-the `/program` slash command (the debrief prompt does its job for now), and
-setting up the scheduled tasks automatically (you create them in the Code
-tab). `LOG.md` records each change and the program that prompted it.
+`approve`, `check`, `map`, `next-id`, `run-night`), the starting files
+(`template/`), the record formats (`schemas/`), the prompts for each line's
+run, its checker and the debrief, and a library for judging a candidate
+against a baseline across several quantities (`roborobo.judge`). Not built
+yet, and marked *(planned)* below: checking that every number in a summary
+traces to a results file, and the `/program` slash command (the debrief
+prompt does its job for now). `LOG.md` records each change and the
+program that prompted it; `docs/always-on.md` is the plan for what comes
+next (lines run from an always-on service, a dashboard instead of the
+debrief).
 
 ## Words used throughout
 
 - **Program**: one research project, kept in its own git repository.
-- **Session**: one scheduled run of the agent, for example 11 pm to 6 am.
+- **Line**: a line of investigation, one question the program is working
+  on. Lines run separately, each with its own memory.
+- **Session**: one run of the agent on one line, up to about an hour. A
+  night runs the lines you instructed, one after another.
 - **Direction**: your written statement of what the program is for and the
   rules it runs under, in `DIRECTION.md`. Only you edit it.
 - **Referee**: whatever judges the agent's results. The agent can submit work
@@ -39,11 +44,12 @@ tab). `LOG.md` records each change and the program that prompted it.
   known loss-of-function variant, method A gets the direction right 90% of the
   time". The agent can only propose a claim; it counts once the referee or you
   accept it.
-- **Instruction**: a short note from you telling tonight's session what to
-  focus on. One per day, dated.
-- **Checker**: a separate Claude session, after each work session, whose only
-  job is to try to break the claims that session made. It never saw the
-  agent's reasoning.
+- **Instruction**: a short note from you telling tonight's lines what to
+  focus on, with a section per line. One per day, dated. Only lines with a
+  section run.
+- **Checker**: a separate Claude session, after each line's session, whose
+  only job is to try to break the claims that session made. It never saw
+  the agent's reasoning.
 - **Debrief**: your daily conversation with Claude about the last session,
   prepared for you each morning, which ends with tomorrow's instruction.
 - **Open question**: one of the program's research questions, listed in
@@ -135,10 +141,11 @@ gives its code `roborobo.judge`.
    rewrote `approvals.json` locally still fails; and it lists every approval
    from the last day, so one you didn't make shows up in the morning.
 
-5. **Schedule it.** Create three Claude Code scheduled tasks in the Code
-   tab (session, checker, debrief), set to run only on this computer, with
-   the prompts in the program's `scheduled/` folder; its README gives the
-   times. (Heavy programs can instead run sessions as cluster jobs, as
+5. **Schedule it.** Install the night runner, a launchd job that starts
+   `program run-night` each evening (`scheduled/run-night.plist`; the
+   folder's README has the two commands), and create the debrief as a
+   Claude Code scheduled task in the Code tab, set to run only on this
+   computer. (Heavy programs can instead run sessions as cluster jobs, as
    miner2049er does on Sterling.) If
    you're not sure the place you picked is good enough (a laptop that may
    sleep, a small disk), have sessions fill in the optional
@@ -147,17 +154,27 @@ gives its code `roborobo.judge`.
 
 ### Every day
 
-- **The session runs.** The agent reads your direction, today's instruction,
-  and the program's records. It writes down each experiment's plan before
-  running it, runs it, asks the referee to judge the result, and records what
-  happened. It ends by writing a plain-language summary of the session with up
-  to five questions for you, each with what the agent will do by default if
-  you don't answer, and its ranked proposals for what to do next.
-- **The checker reviews the session.** A separate session reads
-  what was produced (not the agent's reasoning), tries to break each new
-  claim, and records a verdict for each: holds, doubtful, or broken, with
-  what would resolve the doubt. Open challenges are added to the next
-  instruction, so the agent has to answer them.
+- **Each instructed line runs.** `program run-night` takes the lines
+  tonight's instruction has a section for, plus any line with challenges
+  still open, and runs them one after another. For each, the agent reads
+  your direction, that line's section of the instruction, the line's own
+  memory (`lines/L0013/progress.md`) and the program's records, but works
+  only on that line. It writes down each experiment's plan before running
+  it, runs it (long jobs keep going after the session ends), asks the
+  referee to judge the result, and records what happened. It ends with a
+  plain-language summary of that line's session with up to five questions
+  for you, each with what the agent will do by default if you don't
+  answer, and its ranked proposals for what to do next.
+- **The checker reviews each line's session** right after it. A separate
+  session reads what was produced (not the agent's reasoning), tries to
+  break each new claim, and records a verdict for each: holds, doubtful,
+  or broken, with what would resolve the doubt. A line with a doubtful or
+  broken verdict runs again the next night to answer it, even without an
+  instruction.
+- **Nothing fails quietly.** A session that fails, runs out of time or
+  writes no summary is reported in the night's report
+  (`<data_dir>/logs/<night>/night.md`). One that leaves the repository
+  dirty or `program check` failing stops the night.
 - **The rules are checked.** The session runs `program check` at its start
   and end, and the checker and the debrief run it again, so a failure the
   session didn't report still reaches you. It confirms that your files and
@@ -168,10 +185,11 @@ gives its code `roborobo.judge`.
   every number in a summary appears in a results file; for now the checker
   does it.)*
 - **Your debrief is prepared each morning.** A scheduled task in the Claude
-  Code app on your Mac runs the debrief prompt: it explains what was
-  tried, what happened and what it means, shows the checker's verdicts,
-  recommends answers to the agent's questions, and drafts tonight's
-  instruction. Then it waits. (Schedule it from the Code tab, set to run only
+  Code app on your Mac runs the debrief prompt: line by line, it explains
+  what was tried, what happened and what it means, shows the checker's
+  verdicts, recommends answers to the agent's questions and on lines the
+  agent proposed, and drafts tonight's instruction, asking which lines
+  should run. Then it waits. (Schedule it from the Code tab, set to run only
   on this computer; the app's other scheduling runs in a sandbox that can't
   reach your tools.)
 - **The program map is rebuilt.** `program map` writes one page from the
@@ -184,10 +202,8 @@ gives its code `roborobo.judge`.
   with your recommendations", or discuss any point; it answers "why" by
   looking at the records. When you approve the instruction, it's saved for
   tonight.
-- **If you skip a day**, tonight's session uses the standing fallback
-  instruction (`instructions/fallback.md`): continue with the agent's own
-  top-ranked proposal from last night, and use its stated default for every
-  question you didn't answer.
+- **If you skip a day**, only lines with open challenges run. Nothing else
+  happens until you say which lines to work on.
 
 ### When you change course
 
@@ -216,7 +232,8 @@ runs on old rules.
     the folder READMEs): rendered from `template/` and kept identical to the
     rendering by `program sync`; this is how improvements reach every
     program;
-  - **the agent's** (`PROGRAM.md`, `ledger/`, `sessions/`, `evidence/`):
+  - **the agent's** (`PROGRAM.md`, `ledger/`, `sessions/`, `evidence/`,
+    `lines/`):
     validated against the schemas.
 - **Large data** (simulation outputs, big datasets) lives outside git, in the
   program's data folder or on a cluster; evidence files record where, with a
@@ -243,9 +260,10 @@ This is what `program new` creates:
   approvals.json        fingerprints of your files, written by `program approve`
   CLAUDE.md             RoboRobo's: the agent's standing instructions for every session
   CHECKER.md            RoboRobo's: the checker's standing instructions
-  scheduled/            RoboRobo's: prompts for the session, checker and debrief tasks
+  scheduled/            RoboRobo's: the night runner's launchd job, prompts for each
+                        line's session and its checker, and the debrief task
   PROGRAM.md            the agent's: open questions, current state, next steps
-  instructions/         one dated instruction per day from your debrief, plus the fallback
+  instructions/         one dated instruction per day from your debrief, a section per line
   ledger/               the program's records; lines are only ever added, never changed:
     experiments.jsonl     each experiment's plan (written before running) and its outcome
     claims.jsonl          proposed claims and whether they were accepted
@@ -253,8 +271,9 @@ This is what `program new` creates:
     blockers.jsonl        anything stuck, until it's resolved or explicitly carried forward
     lines.jsonl           lines of investigation: who opened each, where it stands, a note per night
     terms.jsonl           the names the records use, with definitions
-  sessions/             one plain-language summary per session
-  reviews/              the checker's review of each session
+  lines/                one folder per line: the agent's memory of it between sessions
+  sessions/             one plain-language summary per line's session
+  reviews/              the checker's review of each line's session
   evidence/             the results, figures and data the records point to
 ```
 

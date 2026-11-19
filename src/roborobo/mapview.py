@@ -80,8 +80,14 @@ def build(program: Program) -> dict:
         raise ValueError("the records don't validate; run `program check` first:\n  "
                          + "\n  ".join(problems + summary_problems + review_problems))
     who = {"human": program.scientist, "agent": "the agent", "referee": "the referee"}
-    summary_by_night = {s["date"]: s for _, s in summaries}
-    review_by_night = {r["date"]: r for _, r in reviews}
+    # A night has one summary and review per line run (or one for the whole
+    # night, before lines ran separately).
+    summaries_by_night: dict[str, list[dict]] = {}
+    for _, summary in summaries:
+        summaries_by_night.setdefault(summary["date"], []).append(summary)
+    reviews_by_night: dict[str, list[dict]] = {}
+    for _, review in reviews:
+        reviews_by_night.setdefault(review["date"], []).append(review)
     lines = fold_lines(records["lines.jsonl"])
 
     registrations = {r["experiment_id"]: r for r in records["experiments.jsonl"]
@@ -98,35 +104,39 @@ def build(program: Program) -> dict:
 
     verdicts: dict[str, str] = {}
     reviewed_on: dict[str, dict[str, str]] = {}
-    for night in sorted(review_by_night):
-        for item in review_by_night[night]["reviews"]:
-            verdicts[item["claim_id"]] = item["verdict"]
-            reviewed_on.setdefault(night, {})[item["claim_id"]] = item["verdict"]
+    for night in sorted(reviews_by_night):
+        for review in reviews_by_night[night]:
+            for item in review["reviews"]:
+                verdicts[item["claim_id"]] = item["verdict"]
+                reviewed_on.setdefault(night, {})[item["claim_id"]] = item["verdict"]
 
     experiments = {eid: {"title": titles.get(eid) or short(reg["hypothesis"]),
                          "status": outcomes[eid]["status"] if eid in outcomes else None,
                          "chk": verdicts.get(eid)}
                    for eid, reg in registrations.items()}
 
-    nights = sorted(set(summary_by_night) | set(review_by_night)
+    nights = sorted(set(summaries_by_night) | set(reviews_by_night)
                     | {n["night"] for line in lines.values() for n in line["notes"]})
     night_rows = []
     for night in nights:
-        summary, review = summary_by_night.get(night), review_by_night.get(night)
-        conditions = (review or {}).get("run_conditions")
+        night_summaries = summaries_by_night.get(night, [])
+        conditions = [r["run_conditions"] for r in reviews_by_night.get(night, [])
+                      if "run_conditions" in r]
         planned = any(n.get("planned") for line in lines.values()
                       for n in line["notes"] if n["night"] == night)
         if conditions:
-            run, run_text = RUN[conditions["verdict"]], conditions["verdict"]
-        elif summary:
+            worst = max(conditions, key=lambda c: list(RUN).index(c["verdict"]))["verdict"]
+            run, run_text = RUN[worst], worst
+        elif night_summaries:
             run, run_text = "none", "not reviewed"
         else:
             run, run_text = "none", "planned" if planned else "no session"
-        instruction = (summary or {}).get("instruction", "")
+        limits = [s["run_conditions"]["limits_hit"] for s in night_summaries
+                  if s.get("run_conditions", {}).get("limits_hit", "none") != "none"]
         night_rows.append({
             "d": night, "label": label(night), "run": run, "runText": run_text,
-            "fallback": instruction.endswith("fallback.md"),
-            "tip": ((summary or {}).get("run_conditions") or {}).get("limits_hit", "")})
+            "fallback": any(s["instruction"].endswith("fallback.md") for s in night_summaries),
+            "tip": " ".join(limits)})
 
     out_lines = []
     for line in tree_order(lines):
@@ -134,8 +144,8 @@ def build(program: Program) -> dict:
         per_night: dict[str, dict] = {}
         for night in nights:
             notes = [n for n in line["notes"] if n["night"] == night]
-            in_summary = {e["experiment_id"]
-                          for e in summary_by_night.get(night, {}).get("experiments", [])}
+            in_summary = {e["experiment_id"] for s in summaries_by_night.get(night, [])
+                          for e in s["experiments"]}
             in_notes = {p["experiment_id"] for n in notes for p in n.get("experiments", [])}
             reviewed = reviewed_on.get(night, {})
             here = sorted(mine & (in_summary | in_notes | set(reviewed)))
@@ -166,16 +176,20 @@ def build(program: Program) -> dict:
             "nights": per_night, "arts": line["arts"], "other": sorted(mine - seen)})
 
     asks = None
-    for night in sorted(summary_by_night, reverse=True):
-        answers = summary_by_night[night].get("answers")
-        if answers:
-            checked = review_by_night.get(night, {}).get("answers", [])
-            asks = {"night": label(night), "items": [
-                {"q": a["asked"], "status": a["status"], "a": a["answer"],
-                 "departures": a.get("departures", ""),
-                 "verdict": checked[i]["verdict"] if i < len(checked) else None,
-                 "finding": checked[i]["finding"] if i < len(checked) else ""}
-                for i, a in enumerate(answers)]}
+    for night in sorted(summaries_by_night, reverse=True):
+        items = []
+        for summary in summaries_by_night[night]:
+            review = next((r for r in reviews_by_night.get(night, [])
+                           if r.get("line_id") == summary.get("line_id")), {})
+            checked = review.get("answers", [])
+            items += [{"q": a["asked"], "status": a["status"], "a": a["answer"],
+                       "line": summary.get("line_id"),
+                       "departures": a.get("departures", ""),
+                       "verdict": checked[i]["verdict"] if i < len(checked) else None,
+                       "finding": checked[i]["finding"] if i < len(checked) else ""}
+                      for i, a in enumerate(summary.get("answers", []))]
+        if items:
+            asks = {"night": label(night), "items": items}
             break
 
     terms = [{"term": t["term"], "definition": t["definition"], "aliases": t.get("aliases", [])}
