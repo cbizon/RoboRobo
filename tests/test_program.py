@@ -57,9 +57,11 @@ def test_new_renders_the_template(program):
     claude = (program / "CLAUDE.md").read_text()
     assert "Pat reads your summary" in claude
     assert "{{" not in claude
-    session = (program / "scheduled" / "session.md").read_text()
-    assert "scheduled for 23:00 (America/New_York)" in session
-    assert "commit by 05:00" in session
+    line_run = (program / "scheduled" / "line.md").read_text()
+    assert "sessions/YYYY-MM-DD-L0013.json" in line_run and "{{" not in line_run
+    plist = (program / "scheduled" / "run-night.plist").read_text()
+    assert "<integer>23</integer>" in plist and "program run-night --repo" in plist
+    assert not (program / "scheduled" / "session.md").exists()
     settings = json.loads((program / ".claude" / "settings.json").read_text())
     assert "Edit(DIRECTION.md)" in settings["permissions"]["deny"]
     assert "Bash(git push:*)" in settings["permissions"]["deny"]
@@ -324,3 +326,165 @@ def test_next_id(program, capsys):
     append(program, "experiments.jsonl", registration("E0001"))
     run("next-id", "E", "--repo", program)
     assert capsys.readouterr().out.strip() == "E0002"
+
+
+# The night runner, with a stand-in for the agent command: a script that
+# writes the summary or review it was asked for and commits it, the way a
+# real run ends.
+
+STAND_IN = r'''
+import json, os, re, subprocess, sys
+prompt = sys.argv[-1]
+lid = re.search(r"line (L\d{4})", prompt).group(1)
+night = re.search(r"night of (\d{4}-\d{2}-\d{2})", prompt).group(1)
+with open(os.environ["STAND_IN_PROMPTS"], "a") as f:
+    f.write(prompt + "\n")
+if "line-checker.md" in prompt:
+    path = f"reviews/{night}-{lid}.json"
+    doc = {"date": night, "line_id": lid, "reviewer_model": "stand-in",
+           "summary": "Nothing to check.", "reviews": []}
+else:
+    path = f"sessions/{night}-{lid}.json"
+    doc = {"date": night, "line_id": lid, "instruction": f"instructions/{night}.md",
+           "headline": "A quiet run.", "experiments": [], "claims_changed": [],
+           "questions": [], "budget": {}, "open_blockers": [],
+           "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
+    if os.environ.get("STAND_IN_MODE") == "dirty":
+        with open("PROGRAM.md", "a") as f:
+            f.write("half-written\n")
+    if os.environ.get("STAND_IN_MODE") == "fail":
+        sys.exit(3)
+with open(path, "w") as f:
+    json.dump(doc, f)
+subprocess.run(["git", "add", path], check=True)
+subprocess.run(["git", "commit", "-q", "-m", f"{lid} run"], check=True)
+'''
+
+CHALLENGED_REVIEW = {
+    "date": "2026-11-17", "line_id": "L0003", "reviewer_model": "test",
+    "summary": "One result, doubtful.",
+    "reviews": [{"claim_id": "E0001", "plain_claim": "The heater causes the drift.",
+                 "verdict": "doubtful", "what_would_resolve": "A second heater.",
+                 "attacks": [{"check": "other", "what_was_done": "Read the result file.",
+                              "finding": "Only one heater was tried."}]}]}
+
+
+@pytest.fixture
+def night_program(program, tmp_path, monkeypatch):
+    """A program with three lines (L0001 active, L0002 proposed, L0003 active
+    with an open challenge), the stand-in agent, and an approval."""
+    import sys
+    script = tmp_path / "stand_in.py"
+    script.write_text(STAND_IN)
+    monkeypatch.setenv("STAND_IN_PROMPTS", str(tmp_path / "prompts.txt"))
+    with (program / "program.toml").open("a") as f:
+        f.write(f'\n[runs]\nagent = ["{sys.executable}", "{script}"]\nworker_minutes = 1\n')
+    append(program, "lines.jsonl", line("L0001"))
+    append(program, "lines.jsonl", line("L0002", by="agent", name="Spare heater",
+                                        question="Does the spare drift?", reason="One is one sample.",
+                                        status="proposed"))
+    append(program, "lines.jsonl", line("L0003", name="Fan", question="Does the fan matter?"))
+    (program / "reviews" / "2026-11-17-L0003.json").write_text(json.dumps(CHALLENGED_REVIEW))
+    (program / "instructions" / "2026-11-18.md").write_text(
+        "Keep the disk clean.\n\n## L0001 Heater\n\n### Asked\n1. Is it the heater?\n\n"
+        "## L0002 Spare heater\n\n### Asked\n1. Try the spare.\n")
+    commit(program, "lines and tonight's instruction")
+    assert run("approve", "--repo", program) == 0
+    return program
+
+
+def tonight(hour=23, minute=30):
+    from datetime import datetime
+    return lambda: datetime(2026, 11, 18, hour, minute)
+
+
+def test_night_plan_runs_instructed_and_challenged_lines(night_program, capsys):
+    # A dry run fails when an instructed line won't run, so the debrief sees it.
+    assert run("run-night", "--repo", night_program, "--night", "2026-11-18", "--dry-run") == 1
+    out = capsys.readouterr().out
+    assert "L0001: instructed" in out
+    assert "L0003: open challenges in reviews/2026-11-17-L0003.json" in out
+    assert "skipped: instructions/2026-11-18.md has a section for L0002, which is proposed" in out
+
+
+def test_night_runs_each_line_then_its_checker(night_program, tmp_path):
+    from datetime import date
+    from roborobo import config, night
+    program = config.load(night_program)
+    code, text = night.run_night(program, date(2026, 11, 18), only=["L0001", "L0003"],
+                                 now=tonight())
+    assert code == 0, text
+    for lid in ("L0001", "L0003"):
+        assert (night_program / "sessions" / f"2026-11-18-{lid}.json").exists()
+        assert (night_program / "reviews" / f"2026-11-18-{lid}.json").exists()
+    prompts = (tmp_path / "prompts.txt").read_text().splitlines()
+    assert [p.split(" of the ")[0] for p in prompts] == [
+        "Run line L0001", "Check line L0001's run", "Run line L0003", "Check line L0003's run"]
+    assert "`## L0001` section of instructions/2026-11-18.md" in prompts[0]
+    assert "no section for this line" in prompts[2]
+    assert "## L0003 (open challenges" in text
+    logs = tmp_path / "demo-data" / "logs" / "2026-11-18"
+    assert (logs / "night.md").read_text() == text
+    assert (logs / "L0001-worker.log").exists()
+
+
+def test_proposed_line_makes_the_night_report_a_problem(night_program):
+    from datetime import date
+    from roborobo import config, night
+    code, text = night.run_night(config.load(night_program), date(2026, 11, 18), now=tonight())
+    assert code == 1 and "which is proposed" in text
+    assert (night_program / "sessions" / "2026-11-18-L0003.json").exists()
+
+
+def test_dirty_run_stops_the_night(night_program, monkeypatch):
+    from datetime import date
+    from roborobo import config, night
+    monkeypatch.setenv("STAND_IN_MODE", "dirty")
+    code, text = night.run_night(config.load(night_program), date(2026, 11, 18),
+                                 only=["L0001", "L0003"], now=tonight())
+    assert code == 1
+    assert "the worker left uncommitted changes" in text
+    assert "The night stopped early" in text and "Not started: L0003" in text
+    assert not (night_program / "reviews" / "2026-11-18-L0001.json").exists()
+
+
+def test_failed_run_is_reported_and_the_night_goes_on(night_program, monkeypatch):
+    from datetime import date
+    from roborobo import config, night
+    monkeypatch.setenv("STAND_IN_MODE", "fail")
+    code, text = night.run_night(config.load(night_program), date(2026, 11, 18),
+                                 only=["L0001", "L0003"], now=tonight())
+    assert code == 1
+    assert "worker exited with code 3" in text and "the worker wrote no sessions/" in text
+    assert "## L0003" in text and "stopped early" not in text
+
+
+def test_no_line_starts_after_the_session_ends(night_program):
+    from datetime import date
+    from roborobo import config, night
+    code, text = night.run_night(config.load(night_program), date(2026, 11, 18),
+                                 only=["L0001"], now=lambda: __import__("datetime").datetime(2026, 11, 19, 5, 30))
+    assert code == 1 and "Not started: L0001" in text
+
+
+def test_night_of_and_instruction_sections(program):
+    from datetime import date, datetime
+    from roborobo import config, night
+    p = config.load(program)
+    assert night.night_of(p, datetime(2026, 11, 19, 1, 0)) == date(2026, 11, 18)
+    assert night.night_of(p, datetime(2026, 11, 18, 23, 0)) == date(2026, 11, 18)
+    assert night.instructed_lines("## L0002 A\n## L0001 B\n", "x") == ["L0002", "L0001"]
+    (program / "instructions" / "2026-11-18.md").write_text("## Asked\n1. Anything.\n")
+    assert "has no line sections" in night.plan(p, date(2026, 11, 18)).skipped[0]
+    with pytest.raises(ValueError, match="more than one section for L0001"):
+        night.instructed_lines("## L0001 A\n## L0001 again\n", "x")
+
+
+def test_sync_removes_retired_files(program, capsys):
+    run("approve", "--repo", program)
+    (program / "scheduled" / "session.md").write_text("Run tonight's session.\n")
+    code, out = check(program, capsys)
+    assert code == 1 and "scheduled/session.md differs from RoboRobo's template" in out
+    assert run("sync", "--repo", program) == 0
+    assert not (program / "scheduled" / "session.md").exists()
+    assert check(program, capsys)[0] == 0

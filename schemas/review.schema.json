@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://renci.org/research-programs/schemas/review.schema.json",
-  "title": "Checker review (reviews/YYYY-MM-DD.json)",
+  "title": "Checker review (reviews/YYYY-MM-DD.json, or reviews/YYYY-MM-DD-L0001.json for one line's run)",
   "type": "object",
   "required": [
     "date",
@@ -13,6 +13,10 @@
     "date": {
       "type": "string",
       "format": "date"
+    },
+    "line_id": {
+      "$ref": "_common.schema.json#/$defs/id",
+      "description": "The line this run was for, when a night runs one line at a time"
     },
     "reviewer_model": {
       "type": "string",

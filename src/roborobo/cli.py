@@ -5,6 +5,8 @@
     program approve   [--repo DIR]   record the scientist's approval (human only)
     program check     [--repo DIR]   fail loudly if a rule didn't hold
     program map       [--repo DIR]   write the program map, an HTML page
+    program run-night [--repo DIR] [--night YYYY-MM-DD] [--line L0001 ...] [--dry-run]
+                                     run tonight's lines, one at a time
     program next-id E|C|D|B|L|T [--repo DIR]
 """
 
@@ -12,17 +14,18 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
-from roborobo import config, mapview, render
-from roborobo.approvals import approve, verify
+from roborobo import config, mapview, night, render
+from roborobo.approvals import approve
+from roborobo.checks import check_program
 from roborobo.config import CONFIG
 from roborobo.gitutil import git
-from roborobo.records import (blockers_carried, budgets, documents, ledger_consistency,
-                              load_ledger, next_id)
+from roborobo.records import next_id
 
 DEFAULT_SCHEDULE = {"session_start": "23:00", "session_end": "05:00",
-                    "checker": "05:30", "checker_minutes": "45", "debrief": "07:00"}
+                    "checker_minutes": "20", "debrief": "07:00"}
 
 
 def cmd_new(args) -> int:
@@ -49,11 +52,14 @@ def cmd_sync(args) -> int:
     program = config.load(args.repo)
     changed = render.write_template_owned(program)
     created = render.write_missing_seeded(program)
+    removed = render.remove_retired(program)
     for path in changed:
         print(f"updated {path}")
     for path in created:
         print(f"created {path} (fill it in)")
-    if not changed and not created:
+    for path in removed:
+        print(f"removed {path} (RoboRobo no longer uses it)")
+    if not changed and not created and not removed:
         print("template-owned files already match")
     return 0
 
@@ -66,29 +72,7 @@ def cmd_approve(args) -> int:
 
 
 def cmd_check(args) -> int:
-    program = config.load(args.repo)
-    problems: list[str] = []
-    notes: list[str] = []
-
-    problems += [f"{path} differs from RoboRobo's template (run `program sync`)"
-                 for path in render.template_drift(program)]
-    human, facts = verify(program, args.remote)
-    problems += human
-    if facts:
-        notes.append(f"latest approval: {facts['latest_approval']}")
-        if facts["approvals_last_day"]:
-            notes.append("approvals in the last day (check these were yours): "
-                         + ", ".join(facts["approvals_last_day"]))
-
-    records, ledger_problems = load_ledger(program)
-    problems += ledger_problems + ledger_consistency(records)
-    summaries, summary_problems = documents(program, "sessions", "session-summary.schema.json")
-    _, review_problems = documents(program, "reviews", "review.schema.json")
-    problems += summary_problems + review_problems + blockers_carried(records, summaries)
-    budget_problems, budget_report = budgets(program, records)
-    problems += budget_problems
-    notes += [f"budget {line}" for line in budget_report]
-
+    problems, notes = check_program(config.load(args.repo), args.remote)
     for note in notes:
         print(note)
     if problems:
@@ -103,6 +87,14 @@ def cmd_check(args) -> int:
 def cmd_map(args) -> int:
     print(mapview.write(config.load(args.repo), args.out, args.nights))
     return 0
+
+
+def cmd_run_night(args) -> int:
+    program = config.load(args.repo)
+    when = args.night or night.night_of(program, datetime.now())
+    code, text = night.run_night(program, when, args.line, args.dry_run)
+    print(text, end="")
+    return code
 
 
 def cmd_next_id(args) -> int:
@@ -139,6 +131,17 @@ def main(argv=None) -> None:
     pmap.add_argument("--nights", type=int, default=14,
                       help="how many of the latest nights the map shows as columns")
     pmap.set_defaults(func=cmd_map)
+    rn = sub.add_parser("run-night", help="run tonight's lines one at a time, each "
+                        "followed by the checker")
+    rn.add_argument("--repo", type=Path, default=Path.cwd())
+    rn.add_argument("--night", type=date.fromisoformat, default=None,
+                    help="the evening the night starts (default: tonight, or last night "
+                         "before the session's end)")
+    rn.add_argument("--line", action="append", default=None,
+                    help="run only this planned line (repeatable)")
+    rn.add_argument("--dry-run", action="store_true",
+                    help="say which lines would run, and why, without running them")
+    rn.set_defaults(func=cmd_run_night)
     nid = sub.add_parser("next-id", help="next free ledger id")
     nid.add_argument("letter", choices=["E", "C", "D", "B", "L", "T"])
     nid.add_argument("--repo", type=Path, default=Path.cwd())

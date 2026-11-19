@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from roborobo import ROOT, TEMPLATE
-from roborobo.config import APPROVALS, CONFIG, SEEDED, TEMPLATE_OWNED, Program
+from roborobo.config import APPROVALS, CONFIG, RETIRED, SEEDED, TEMPLATE_OWNED, Program
 
 PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
@@ -78,12 +78,25 @@ def write_missing_seeded(program: Program) -> list[str]:
     return created
 
 
+def remove_retired(program: Program) -> list[str]:
+    """Delete files RoboRobo used to render and no longer does."""
+    removed = []
+    for path in RETIRED:
+        target = program.repo / path
+        if target.exists():
+            target.unlink()
+            removed.append(path)
+    return removed
+
+
 def template_drift(program: Program) -> list[str]:
-    """Template-owned files that differ from their rendering."""
+    """Template-owned files that differ from their rendering, and retired
+    ones still present."""
     return [path for path in TEMPLATE_OWNED
             if not (program.repo / path).exists()
-            or (program.repo / path).read_text() != rendered(program, path)]
+            or (program.repo / path).read_text() != rendered(program, path)] + \
+        [path for path in RETIRED if (program.repo / path).exists()]
 
 
-__all__ = ["CONFIG", "fill", "rendered", "settings", "template_drift",
+__all__ = ["CONFIG", "fill", "remove_retired", "rendered", "settings", "template_drift",
            "write_missing_seeded", "write_template_owned"]

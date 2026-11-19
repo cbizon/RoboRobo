@@ -16,7 +16,7 @@
     "reason": {"$ref": "_common.schema.json#/$defs/text", "description": "Why the line was opened, for a line the agent opened"},
     "parent": {"$ref": "_common.schema.json#/$defs/id", "description": "The line this one branched from"},
     "night": {"type": "string", "format": "date", "description": "The session date a note is about, or the night an open or update belongs to"},
-    "status": {"enum": ["active", "paused", "closed", "dropped"]},
+    "status": {"enum": ["proposed", "active", "paused", "closed", "dropped"], "description": "A line the agent opens starts proposed and runs only once the scientist makes it active"},
     "state": {"$ref": "_common.schema.json#/$defs/text", "description": "Where the line stands now, for someone who reads nothing else"},
     "feeds": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}, "description": "Lines that use this line's result"},
     "artifacts": {

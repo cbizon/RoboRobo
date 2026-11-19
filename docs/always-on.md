@@ -1,7 +1,10 @@
 # Always-on RoboRobo: lines as the unit of work
 
 Status: draft for discussion, revised 2026-11-18 after first review.
-Nothing here is built.
+Phase 1 is built (`program run-night`), with two changes from the plan
+below: lines commit on `main` instead of line branches, since they run one
+at a time and code already lives on shared `method/*` branches; and only
+instructed lines (and lines with open challenges) run. See `LOG.md`.
 
 ## Why change
 
