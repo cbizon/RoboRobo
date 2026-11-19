@@ -4,6 +4,33 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-21
+
+- Jobs can run on a Slurm cluster: `program submit` and `program jobs`,
+  first for Hatteras. Long simulations shouldn't depend on the Mac staying
+  awake, and this works from today's nightly runs without the Sterling
+  service.
+- Hosts are `[hosts.<name>]` in `program.toml`, which is human-only and
+  approved, so the agent can't add a host or raise its slot limit.
+- The code goes over with `git archive` at one commit, not as a clone, so
+  the cluster needs no GitHub key and the commit that ran is on record.
+  Submitting refuses uncommitted tracked changes, an unregistered
+  experiment, one that already has an outcome, and a host with no free
+  slot.
+- Job state lives outside git, in `<data_dir>/jobs/`, as the always-on
+  design puts it: an operational record, rebuildable from the cluster.
+  When a job ends its outputs, Slurm log and `job.json` (commit, command,
+  resources, state, CPU-hours) go into `evidence/<E>/<host>-<job>/`, so
+  the research record says where and how it ran.
+- Fail loudly: failed, timed-out, out-of-memory, cancelled and vanished
+  jobs, and outputs over `fetch_max_mb`, are reported and make `program
+  jobs` exit non-zero. Nothing is resubmitted on its own.
+- Not yet: the agent runs as the scientist on the Mac, so it could call
+  `ssh` or `sbatch` itself; the brief says not to, and nothing enforces it.
+- Tried on Hatteras (`ht1.renci.org`, partition `batch`): a job ran and
+  was collected into evidence, and a failing job was reported as FAILED
+  with its log.
+
 ## 2026-11-20 (from sequel)
 
 - The first line-by-line night didn't run: launchd's login shell doesn't

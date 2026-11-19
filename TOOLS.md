@@ -1,7 +1,7 @@
 # Tooling
 
 Status (Nov 2026): `program new`, `sync`, `approve`, `check`, `map`,
-`next-id` and `run-night` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
+`next-id`, `run-night`, `submit` and `jobs` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
 enforced; 3 is enforced as "an outcome follows its registration in the
 ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
 `program digest` and the `/program` skill aren't built; the debrief prompt
@@ -23,6 +23,8 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program map` | anyone | Write the program map, an HTML page built from the records: lines of investigation against nights, a card per line, a glossary. Default path `<data_dir>/map/index.html`; `--out` and `--nights` change where and how many nights. |
 | `program next-id <E\|C\|D\|B\|L\|T>` | agent | Next free ledger id, so records don't collide. |
 | `program run-night` | launchd, each evening; human, to run a line now | Run the lines the night's instruction has a section for (and lines with open challenges), one at a time, each followed by the checker. `--dry-run` says which and why; `--line` runs only the named lines; `--night` sets the date. Reports to `<data_dir>/logs/<night>/night.md`. |
+| `program submit` | agent | Run one command as a Slurm job on a host in `program.toml` `[hosts]`, on the code at one commit (`git archive` over SSH), for a registered experiment. Refuses uncommitted code, unregistered experiments and full hosts. |
+| `program jobs` | agent, each run | Poll `sacct`; copy ended jobs' outputs, log and `job.json` into `evidence/<E>/<host>-<job>/`; exit non-zero on any failed, vanished or too-big job. |
 
 ### What `program check` enforces
 
@@ -78,7 +80,8 @@ Each program says in `DIRECTION.md` where its sessions run:
   opens the program repository and runs one session with the brief in
   `CLAUDE.md`.
 - **Programs with long compute:** sessions as above, plus a job queue the
-  agent submits to (Slurm on Hatteras, Kubernetes Jobs on Sterling).
+  agent submits to (Slurm on Hatteras via `program submit`, built;
+  Kubernetes Jobs on Sterling, not yet).
   Sessions pick up finished jobs; jobs never run inside a session.
 - **Programs whose referee must be sealed** (hidden answer keys): the
   miner2049er pattern on Sterling, with the referee in a separate pod.

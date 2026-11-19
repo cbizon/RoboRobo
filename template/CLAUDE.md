@@ -169,6 +169,25 @@ background processes that outlive the run, and record them in your line's
 - Stay within the core and memory limits in `budgets.yaml`, counting jobs
   started by earlier sessions.
 
+### On a cluster
+
+If `program.toml` lists `[hosts]`, jobs can run there instead. Use only
+those hosts; asking for another is a decision for {{scientist}}.
+
+- Say in the experiment's registration which host and why ("hatteras,
+  because 40 seeds × 6 h").
+- Commit the code, then submit with `program submit --host hatteras
+  --experiment E0131 [--time 6:00:00 --mem 16G --cpus 4] -- uv run python
+  sim.py`. The job runs that commit, from the repository's top folder, and
+  writes outputs to `$ROBOROBO_OUT`. Never call `ssh`, `sbatch` or `scancel`
+  yourself.
+- Don't wait for the job; record its id in your line's `progress.md` and
+  end the run.
+- Run `program jobs` at the start of each run. Jobs that ended have their
+  outputs, Slurm log and `job.json` in `evidence/<experiment>/<host>-<job>/`.
+  A failed, vanished or too-big job is a problem to record, not to retry
+  silently. `job.json` gives `cpu_hours` for the outcome's `cost_actual`.
+
 ## Run conditions
 
 Measure, don't guess. Record in the session summary's `run_conditions`:
