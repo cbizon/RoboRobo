@@ -61,6 +61,7 @@ def test_new_renders_the_template(program):
     assert "sessions/YYYY-MM-DD-L0013.json" in line_run and "{{" not in line_run
     plist = (program / "scheduled" / "run-night.plist").read_text()
     assert "<integer>23</integer>" in plist and "program run-night --repo" in plist
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in plist
     assert not (program / "scheduled" / "session.md").exists()
     settings = json.loads((program / ".claude" / "settings.json").read_text())
     assert "Edit(DIRECTION.md)" in settings["permissions"]["deny"]
@@ -460,11 +461,17 @@ def test_failed_run_is_reported_and_the_night_goes_on(night_program, monkeypatch
 
 
 def test_no_line_starts_after_the_session_ends(night_program):
-    from datetime import date
+    from datetime import date, datetime
     from roborobo import config, night
+    morning = lambda: datetime(2026, 11, 19, 5, 30)
+    (night_program / "instructions" / "2026-11-18.md").write_text("## L0001 Heater\n")
+    commit(night_program, "only L0001 tonight")
+    code, text = night.run_night(config.load(night_program), date(2026, 11, 18), now=morning)
+    assert code == 1 and "Not started: L0001, L0003" in text
+    # A line asked for by name runs whenever it's asked for.
     code, text = night.run_night(config.load(night_program), date(2026, 11, 18),
-                                 only=["L0001"], now=lambda: __import__("datetime").datetime(2026, 11, 19, 5, 30))
-    assert code == 1 and "Not started: L0001" in text
+                                 only=["L0001"], now=morning)
+    assert code == 0, text
 
 
 def test_night_of_and_instruction_sections(program):
@@ -488,3 +495,14 @@ def test_sync_removes_retired_files(program, capsys):
     assert run("sync", "--repo", program) == 0
     assert not (program / "scheduled" / "session.md").exists()
     assert check(program, capsys)[0] == 0
+
+
+def test_missing_agent_command_stops_the_night_before_any_line(night_program, monkeypatch):
+    from datetime import date
+    from roborobo import config, night
+    program = config.load(night_program)
+    program.runs["agent"] = ["no-such-agent-command", "-p"]
+    code, text = night.run_night(program, date(2026, 11, 18), only=["L0001"], now=tonight())
+    assert code == 1
+    assert "the agent command 'no-such-agent-command' isn't on this PATH" in text
+    assert "Not started: L0001" in text and "## L0001" not in text
