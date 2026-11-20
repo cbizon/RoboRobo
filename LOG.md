@@ -4,6 +4,17 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-20 (from sequel)
+
+- The first line-by-line night didn't run: launchd's login shell doesn't
+  read `~/.zshrc`, where `~/.local/bin` (Claude Code's location) is put
+  on PATH, so every line failed with "claude wasn't found". The plist now
+  adds `~/.local/bin` to PATH, and the runner checks the agent command
+  before the first line and stops the night with one clear message,
+  instead of failing every line.
+- Lines named with `--line` run at any hour; the session's end only stops
+  a scheduled night. Re-running a missed night by hand was impossible.
+
 ## 2026-11-18 (from sequel)
 
 - Nights run one line of investigation at a time (`program run-night`).

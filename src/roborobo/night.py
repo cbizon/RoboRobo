@@ -15,7 +15,9 @@ and to standard output, and the exit code is 1 if anything went wrong.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -229,7 +231,8 @@ def report(night_plan: Plan, results: list[LineResult], stopped: str | None,
 
 def run_night(program: Program, night: date, only: list[str] | None = None,
               dry_run: bool = False, now=datetime.now) -> tuple[int, str]:
-    """Run the night; return the exit code and the report."""
+    """Run the night; return the exit code and the report.  Lines named in
+    `only` are run on request, so the session's end doesn't stop them."""
     night_plan = plan(program, night)
     if only:
         unknown = sorted(set(only) - {lid for lid, _ in night_plan.lines})
@@ -245,15 +248,20 @@ def run_night(program: Program, night: date, only: list[str] | None = None,
     logs = Path(program.data_dir).expanduser() / "logs" / night.isoformat()
     results: list[LineResult] = []
     stopped = None
+    agent = program.runs["agent"][0]
     dirty = uncommitted(program)
     failed, _ = check_program(program)
-    if dirty:
+    if shutil.which(agent) is None:
+        stopped = (f"the agent command {agent!r} isn't on this PATH "
+                   f"({os.environ.get('PATH', '')}); give its full path as [runs] agent "
+                   "in program.toml, or add its folder to PATH where the runner starts")
+    elif dirty:
         stopped = "the repository has uncommitted changes: " + "; ".join(dirty[:5])
     elif failed:
         stopped = "program check fails before the first line: " + "; ".join(failed)
     remaining = [] if stopped else list(night_plan.lines)
     end = deadline(program, night)
-    while remaining and now() < end:
+    while remaining and (only or now() < end):
         lid, reasons = remaining.pop(0)
         result, go_on = run_line(program, night, lid, reasons, night_plan.instruction, logs)
         results.append(result)
