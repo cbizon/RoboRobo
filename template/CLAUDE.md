@@ -179,7 +179,9 @@ those hosts; asking for another is a decision for {{scientist}}.
 - Commit the code, then submit with `program submit --host hatteras
   --experiment E0131 [--time 6:00:00 --mem 16G --cpus 4] -- uv run python
   sim.py`. The job runs that commit from the repository's top folder and
-  writes outputs to `$ROBOROBO_OUT`. Never call `ssh`, `rsync`, `sbatch` or
+  writes outputs to `$ROBOROBO_OUT`. Arguments are passed as given, so to
+  use `$ROBOROBO_OUT` or `$ROBOROBO_IN` in them, or chain commands, wrap
+  the command in `bash -c '...'`. Never call `ssh`, `rsync`, `sbatch` or
   `scancel` yourself.
 - Code from another branch: `--tree engine=method/nudge` checks it out at
   `../engine`, a real git checkout. Sibling repositories named as uv path

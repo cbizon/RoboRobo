@@ -36,9 +36,13 @@ if it is, it goes here first and reaches the program through `program sync`.
   jobs` exit non-zero. Nothing is resubmitted on its own.
 - Not yet: the agent runs as the scientist on the Mac, so it could call
   `ssh` or `sbatch` itself; the brief says not to, and nothing enforces it.
-- Tried on Hatteras (`ht1.renci.org`, partition `batch`): a job ran and
-  was collected into evidence, and a failing job was reported as FAILED
-  with its log.
+- Tried on Hatteras (`ht1.renci.org`, partition `batch`) with a copy of
+  sequel: a fresh run of `referee/long_contact.py` on `--tree
+  engine=method/nudge`, and E0081's run continued from its Mac checkpoint
+  (`--input`) on the held-contact engine at its exact commit. Both built
+  sequel and RoboRobo on the node and recorded the engine's commit;
+  checkpoints stayed on the cluster. A failing job came back FAILED with
+  its traceback.
 
 ## 2026-11-20 (from sequel)
 
