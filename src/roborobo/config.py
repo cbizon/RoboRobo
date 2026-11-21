@@ -182,6 +182,7 @@ def render_config(name: str, title: str, scientist: str, data_dir: str,
         '# mem = "16G"',
         "# cpus = 1",
         "# fetch_max_mb = 500              # bigger outputs stay on the cluster",
+        '# fetch_exclude = ["checkpoint*.npz"]  # never fetched',
         '# env = {UV_CACHE_DIR = "/projects/<alloc>/uv-cache", UV_LINK_MODE = "copy"}',
         "",
     ]

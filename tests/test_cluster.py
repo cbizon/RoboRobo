@@ -1,9 +1,9 @@
 """program submit and program jobs, end to end against a stand-in cluster.
 
 ``ssh``, ``sbatch`` and ``sacct`` on PATH are small scripts: ssh runs its
-command here (so git archive, tar and rsync really run), sbatch runs the job
-script at once and records how it ended, and sacct reports that. Everything
-but Slurm itself is real.
+command here (so git push and clone, rsync and the size check really run),
+sbatch runs the job script at once and records how it ended, and sacct
+reports that. Everything but Slurm itself is real.
 """
 
 import json
@@ -33,6 +33,11 @@ job_id = int(counter.read_text()) if counter.exists() else 1001
 counter.write_text(str(job_id + 1))
 if (state / "hold").exists():
     (state / str(job_id)).write_text("PENDING")
+elif (state / "running").exists():
+    log = re.search(r"#SBATCH --output=(\\S+)", script.read_text())[1].replace("%j", str(job_id))
+    with open(log, "w") as out:
+        subprocess.run(["bash", str(script)], stdout=out, stderr=subprocess.STDOUT)
+    (state / str(job_id)).write_text("RUNNING")
 else:
     log = re.search(r"#SBATCH --output=(\\S+)", script.read_text())[1].replace("%j", str(job_id))
     with open(log, "w") as out:
@@ -95,17 +100,37 @@ REGISTRATION = {"record": "registration", "experiment_id": "E0001",
 
 
 @pytest.fixture
-def program(tmp_path, slurm):
+def tools(tmp_path):
+    """A sibling repository the program uses as a uv path source, as sequel
+    uses research-programs."""
+    repo = tmp_path / "tools"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / "hello.txt").write_text("hello from tools\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "tools")
+    return repo
+
+
+@pytest.fixture
+def program(tmp_path, slurm, tools):
     repo = tmp_path / "demo"
     assert run("new", repo, "--name", "demo", "--title", "A demonstration program",
                "--scientist", "Pat", "--data-dir", str(tmp_path / "demo-data")) == 0
     with (repo / "program.toml").open("a") as toml:
         toml.write(f'\n[hosts.hatteras]\nkind = "slurm"\nssh = "ht1"\n'
                    f'workdir = "{tmp_path / "cluster"}"\nslots = 2\nmem = "1G"\n'
+                   f'fetch_exclude = ["checkpoint*.npz"]\n'
                    f'env = {{UV_LINK_MODE = "copy"}}\n')
+    (repo / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n'
+                                         'dependencies = ["tools"]\n\n[tool.uv.sources]\n'
+                                         'tools = { path = "../tools", editable = true }\n')
     (repo / "ledger" / "experiments.jsonl").write_text(json.dumps(REGISTRATION) + "\n")
     (repo / "sim.sh").write_text('echo "seed $1" > "$ROBOROBO_OUT/result.txt"\n'
-                                 'echo "uv mode $UV_LINK_MODE"\n')
+                                 'echo big > "$ROBOROBO_OUT/checkpoint-0001.npz"\n'
+                                 'echo "uv mode $UV_LINK_MODE"\n'
+                                 'cat ../tools/hello.txt\n'
+                                 'echo "code at $(git rev-parse HEAD) on $(git branch --show-current)"\n')
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "register E0001")
     return repo
@@ -122,6 +147,8 @@ def test_submit_then_collect(program, slurm, capsys):
     job = cluster.load_jobs(config.load(program))[0]
     assert job["commit"] == git(program, "rev-parse", "HEAD").strip()
     assert job["line_id"] == "L0001" and job["sbatch"]["mem"] == "1G"
+    assert job["trees"]["tools"]["commit"] == \
+        git(program.parent / "tools", "rev-parse", "HEAD").strip()
     script = (Path(job["run_dir"]) / "job.sh").read_text()
     assert "#SBATCH --job-name=demo-E0001" in script and "#SBATCH --mem=1G" in script
     assert "export UV_LINK_MODE=copy" in script
@@ -129,11 +156,15 @@ def test_submit_then_collect(program, slurm, capsys):
     assert run("jobs", "--repo", program) == 0
     out = capsys.readouterr().out
     assert "ended   hatteras 1001 E0001 COMPLETED" in out and "2.0 CPU-h" in out
-    evidence = program / "evidence" / "E0001" / "hatteras-1001"
-    assert (evidence / "out" / "result.txt").read_text() == "seed 7\n"
-    assert "uv mode copy" in (evidence / "slurm-1001.out").read_text()
-    recorded = json.loads((evidence / "job.json").read_text())
+    outputs = program.parent / "demo-data" / "runs" / "E0001" / "hatteras-1001"
+    assert (outputs / "out" / "result.txt").read_text() == "seed 7\n"
+    assert not (outputs / "out" / "checkpoint-0001.npz").exists()  # fetch_exclude
+    log = (outputs / "slurm-1001.out").read_text()
+    assert "uv mode copy" in log and "hello from tools" in log
+    assert f"code at {job['commit']} on main" in log  # a real checkout, on its branch
+    recorded = json.loads((program / "evidence" / "E0001" / "hatteras-1001.json").read_text())
     assert recorded["state"] == "COMPLETED" and recorded["cpu_hours"] == 2.0
+    assert json.loads((outputs / "job.json").read_text()) == recorded
 
     assert run("jobs", "--repo", program) == 0
     assert "no jobs in flight" in capsys.readouterr().out
@@ -145,7 +176,8 @@ def test_failed_job_is_reported_and_its_log_fetched(program, capsys):
     assert run("jobs", "--repo", program) == 1
     out = capsys.readouterr().out
     assert "ended FAILED (exit 3:0)" in out
-    assert "broke" in (program / "evidence/E0001/hatteras-1001/slurm-1001.out").read_text()
+    log = program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out"
+    assert "broke" in log.read_text()
 
 
 def test_pending_jobs_hold_slots(program, slurm, capsys):
@@ -180,7 +212,8 @@ def test_big_outputs_stay_on_the_cluster(program, capsys):
         "bash", "-c", 'head -c 3000000 /dev/zero > "$ROBOROBO_OUT/big"')
     assert run("jobs", "--repo", program) == 1
     assert "over fetch_max_mb=1; fetched only the log" in capsys.readouterr().out
-    assert not (program / "evidence/E0001/hatteras-1001/out").exists()
+    assert (program / "evidence/E0001/hatteras-1001.json").exists()
+    assert not (program.parent / "demo-data/runs/E0001/hatteras-1001/out").exists()
 
 
 def test_unknown_host_is_refused(program):
@@ -208,6 +241,58 @@ def test_uncommitted_code_is_refused(program):
     (program / "sim.sh").write_text("echo changed\n")
     assert "commit first" in run("submit", "--repo", program, "--host", "hatteras",
                                  "--experiment", "E0001", "--", "bash", "sim.sh")
+
+
+def test_engine_tree_and_inputs(program, capsys):
+    git(program, "branch", "method/nudge")
+    git(program, "checkout", "-q", "method/nudge")
+    (program / "engine.txt").write_text("nudge engine\n")
+    git(program, "add", "-A")
+    git(program, "commit", "-q", "-m", "nudge")
+    git(program, "checkout", "-q", "main")
+    start = program.parent / "demo-data" / "runs" / "E0000" / "start"
+    start.mkdir(parents=True)
+    (start / "checkpoint.npz").write_text("state\n")
+    assert run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+               "--tree", "engine=method/nudge", "--input", start, "--", "bash", "-c",
+               'cat ../engine/engine.txt "$ROBOROBO_IN/start/checkpoint.npz"; '
+               'git -C ../engine branch --show-current; test ! -e engine.txt') == 0
+    job = cluster.load_jobs(config.load(program))[0]
+    assert job["trees"]["engine"]["branch"] == "method/nudge"
+    assert run("jobs", "--repo", program) == 0
+    log = (program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out").read_text()
+    assert log.split() == ["nudge", "engine", "state", "method/nudge"]
+
+
+def test_running_jobs_sync_progress(program, slurm, capsys):
+    (slurm / "running").touch()
+    run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001", "--",
+        "bash", "sim.sh", "3")
+    capsys.readouterr()
+    assert run("jobs", "--repo", program) == 0
+    out = capsys.readouterr().out
+    assert "running hatteras 1001 E0001 RUNNING" in out
+    outputs = program.parent / "demo-data/runs/E0001/hatteras-1001"
+    assert (outputs / "out" / "result.txt").read_text() == "seed 3\n"
+    assert not (program / "evidence/E0001/hatteras-1001.json").exists()
+
+
+def test_inputs_must_come_from_the_data_folder(program, tmp_path):
+    (tmp_path / "elsewhere.txt").write_text("x")
+    assert "is not under the program's data folder" in run(
+        "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+        "--input", tmp_path / "elsewhere.txt", "--", "true")
+
+
+def test_reserved_tree_names_are_refused(program):
+    assert "reserved: out" in run("submit", "--repo", program, "--host", "hatteras",
+                                  "--experiment", "E0001", "--tree", "out=main", "--", "true")
+
+
+def test_uncommitted_path_source_is_refused(program, tools):
+    (tools / "hello.txt").write_text("changed\n")
+    assert "commit first, since the job uses tools" in run(
+        "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001", "--", "true")
 
 
 def test_parse_sacct():

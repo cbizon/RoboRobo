@@ -23,8 +23,8 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program map` | anyone | Write the program map, an HTML page built from the records: lines of investigation against nights, a card per line, a glossary. Default path `<data_dir>/map/index.html`; `--out` and `--nights` change where and how many nights. |
 | `program next-id <E\|C\|D\|B\|L\|T>` | agent | Next free ledger id, so records don't collide. |
 | `program run-night` | launchd, each evening; human, to run a line now | Run the lines the night's instruction has a section for (and lines with open challenges), one at a time, each followed by the checker. `--dry-run` says which and why; `--line` runs only the named lines; `--night` sets the date. Reports to `<data_dir>/logs/<night>/night.md`. |
-| `program submit` | agent | Run one command as a Slurm job on a host in `program.toml` `[hosts]`, on the code at one commit (`git archive` over SSH), for a registered experiment. Refuses uncommitted code, unregistered experiments and full hosts. |
-| `program jobs` | agent, each run | Poll `sacct`; copy ended jobs' outputs, log and `job.json` into `evidence/<E>/<host>-<job>/`; exit non-zero on any failed, vanished or too-big job. |
+| `program submit` | agent | Run one command as a Slurm job on a host in `program.toml` `[hosts]`, for a registered experiment. Code goes as git checkouts at recorded commits (`--tree NAME=REV` for more, uv path sources automatically), pushed over SSH; `--input` sends files from the data folder. Refuses uncommitted code, unregistered experiments and full hosts. |
+| `program jobs` | agent, each run | Poll `sacct`; sync outputs (less `fetch_exclude`) and logs into `<data_dir>/runs/<E>/<host>-<job>/`, running jobs included; record ended jobs in `evidence/<E>/<host>-<job>.json`; exit non-zero on any failed, vanished or too-big job. |
 
 ### What `program check` enforces
 

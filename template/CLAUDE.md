@@ -178,15 +178,25 @@ those hosts; asking for another is a decision for {{scientist}}.
   because 40 seeds × 6 h").
 - Commit the code, then submit with `program submit --host hatteras
   --experiment E0131 [--time 6:00:00 --mem 16G --cpus 4] -- uv run python
-  sim.py`. The job runs that commit, from the repository's top folder, and
-  writes outputs to `$ROBOROBO_OUT`. Never call `ssh`, `sbatch` or `scancel`
-  yourself.
+  sim.py`. The job runs that commit from the repository's top folder and
+  writes outputs to `$ROBOROBO_OUT`. Never call `ssh`, `rsync`, `sbatch` or
+  `scancel` yourself.
+- Code from another branch: `--tree engine=method/nudge` checks it out at
+  `../engine`, a real git checkout. Sibling repositories named as uv path
+  sources in `pyproject.toml` go along by themselves, at their committed
+  state.
+- Files a job starts from (a checkpoint to continue): `--input <path under
+  {{data_dir}}>`, repeatable; the job finds them in `$ROBOROBO_IN`.
 - Don't wait for the job; record its id in your line's `progress.md` and
   end the run.
-- Run `program jobs` at the start of each run. Jobs that ended have their
-  outputs, Slurm log and `job.json` in `evidence/<experiment>/<host>-<job>/`.
-  A failed, vanished or too-big job is a problem to record, not to retry
-  silently. `job.json` gives `cpu_hours` for the outcome's `cost_actual`.
+- Run `program jobs` at the start of each run. It syncs every job's
+  outputs (less the host's `fetch_exclude`, such as checkpoints, which stay
+  on the cluster) and Slurm log into
+  `{{data_dir}}/runs/<experiment>/<host>-<job>/`, running jobs included, so
+  you can follow progress. A job that ended also gets a record,
+  `evidence/<experiment>/<host>-<job>.json` (commits, command, resources,
+  state, `cpu_hours` for the outcome's `cost_actual`); commit it. A failed,
+  vanished or too-big job is a problem to record, not to retry silently.
 
 ## Run conditions
 
