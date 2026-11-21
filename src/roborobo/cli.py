@@ -8,6 +8,10 @@
     program run-night [--repo DIR] [--night YYYY-MM-DD] [--line L0001 ...] [--dry-run]
                                      run tonight's lines, one at a time
     program next-id E|C|D|B|L|T [--repo DIR]
+    program submit --host H --experiment E [--rev REV] [--tree NAME=REV ...]
+                   [--input PATH ...] [--time T] [--mem M] [--cpus N] [--repo DIR]
+                   -- COMMAND...                run a job on a cluster
+    program jobs      [--repo DIR]   check jobs in flight; collect the ones that ended
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from roborobo import config, mapview, night, render
+from roborobo import cluster, config, mapview, night, render
 from roborobo.approvals import approve
 from roborobo.checks import check_program
 from roborobo.config import CONFIG
@@ -102,6 +106,22 @@ def cmd_next_id(args) -> int:
     return 0
 
 
+def cmd_submit(args) -> int:
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    job = cluster.submit(config.load(args.repo), args.host, args.experiment, command,
+                         args.rev, args.time, args.mem, args.cpus, args.tree or [],
+                         args.input or [])
+    print(f"submitted {job['experiment_id']} as job {job['job_id']} on {job['host']} "
+          f"(commit {job['commit'][:10]}, {job['run_dir']})")
+    return 0
+
+
+def cmd_jobs(args) -> int:
+    report = cluster.refresh(config.load(args.repo))
+    print(cluster.describe(report), end="")
+    return 1 if report.problems else 0
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="program", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="command", required=True)
@@ -146,6 +166,27 @@ def main(argv=None) -> None:
     nid.add_argument("letter", choices=["E", "C", "D", "B", "L", "T"])
     nid.add_argument("--repo", type=Path, default=Path.cwd())
     nid.set_defaults(func=cmd_next_id)
+    sj = sub.add_parser("submit", help="run a job on a cluster in program.toml [hosts]")
+    sj.add_argument("--repo", type=Path, default=Path.cwd())
+    sj.add_argument("--host", required=True)
+    sj.add_argument("--experiment", required=True, help="the registered experiment it serves")
+    sj.add_argument("--rev", default="HEAD", help="the commit whose code runs (default HEAD)")
+    sj.add_argument("--tree", action="append", metavar="NAME=REV",
+                    help="also check out REV of this repository at ../NAME, e.g. "
+                         "engine=method/nudge (repeatable)")
+    sj.add_argument("--input", action="append", type=Path, metavar="PATH",
+                    help="send this file or folder from the data folder; the job finds "
+                         "it in $ROBOROBO_IN (repeatable)")
+    sj.add_argument("--time", help="Slurm time limit, e.g. 6:00:00 (default: the host's)")
+    sj.add_argument("--mem", help="memory, e.g. 16G (default: the host's)")
+    sj.add_argument("--cpus", type=int, help="CPUs per task (default: the host's)")
+    sj.add_argument("command", nargs=argparse.REMAINDER,
+                    help="after --: the command, run from the code's top folder")
+    sj.set_defaults(func=cmd_submit)
+    jb = sub.add_parser("jobs", help="check jobs in flight, sync their outputs into "
+                        "<data_dir>/runs/, and record the ones that ended")
+    jb.add_argument("--repo", type=Path, default=Path.cwd())
+    jb.set_defaults(func=cmd_jobs)
     args = ap.parse_args(argv)
     sys.exit(args.func(args))
 

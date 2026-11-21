@@ -297,6 +297,10 @@ slots = 20
 kind = "<to confirm>"       # reached from the pod over SSH
 slots = 8
 
+[hosts.hatteras]
+kind = "slurm"              # built: `program submit` / `program jobs`
+slots = 8
+
 [hosts.local]
 kind = "pull"               # your Mac asks the service for work
 slots = 2

@@ -4,6 +4,46 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-21
+
+- Jobs can run on a Slurm cluster: `program submit` and `program jobs`,
+  first for Hatteras. Long simulations shouldn't depend on the Mac staying
+  awake, and this works from today's nightly runs without the Sterling
+  service.
+- Hosts are `[hosts.<name>]` in `program.toml`, which is human-only and
+  approved, so the agent can't add a host or raise its slot limit.
+- Each job's code is real git checkouts at recorded commits, pushed over
+  SSH to a bare repository on the cluster: no GitHub key there, and code
+  that asks git for its own commit (sequel's harness does) works. A job can
+  take more trees (`--tree engine=method/nudge`, for sequel's harness on
+  `main` running an engine branch), and sibling repositories named as uv
+  path sources go along at the same relative path (sequel's
+  `../research-programs`). Submitting refuses uncommitted tracked changes
+  (in the program and in path sources), an unregistered experiment, one
+  that already has an outcome, and a host with no free slot.
+- `--input` sends files from the data folder, such as a checkpoint to
+  continue from; nothing outside the data folder.
+- Outputs come back to `<data_dir>/runs/<E>/<host>-<job>/`, not
+  `evidence/`, because run outputs can be large and the data folder is
+  where programs keep them; the host's `fetch_exclude` (checkpoints) stays
+  on the cluster. `program jobs` syncs running jobs too, so long jobs show
+  progress. Job state lives in `<data_dir>/jobs/`. When a job ends its
+  `job.json` (commits, command, resources, state, CPU-hours) is written to
+  `evidence/<E>/<host>-<job>.json`, so the record in git says where and
+  how it ran.
+- Fail loudly: failed, timed-out, out-of-memory, cancelled and vanished
+  jobs, and outputs over `fetch_max_mb`, are reported and make `program
+  jobs` exit non-zero. Nothing is resubmitted on its own.
+- Not yet: the agent runs as the scientist on the Mac, so it could call
+  `ssh` or `sbatch` itself; the brief says not to, and nothing enforces it.
+- Tried on Hatteras (`ht1.renci.org`, partition `batch`) with a copy of
+  sequel: a fresh run of `referee/long_contact.py` on `--tree
+  engine=method/nudge`, and E0081's run continued from its Mac checkpoint
+  (`--input`) on the held-contact engine at its exact commit. Both built
+  sequel and RoboRobo on the node and recorded the engine's commit;
+  checkpoints stayed on the cluster. A failing job came back FAILED with
+  its traceback.
+
 ## 2026-11-20 (from sequel)
 
 - The first line-by-line night didn't run: launchd's login shell doesn't

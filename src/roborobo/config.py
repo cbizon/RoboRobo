@@ -87,6 +87,8 @@ class Program:
     schedule: dict[str, str]
     human_only: list[str] = field(default_factory=lambda: list(DEFAULT_HUMAN_ONLY))
     runs: dict = field(default_factory=lambda: dict(DEFAULT_RUNS))
+    # Clusters jobs may run on ([hosts.<name>]); see roborobo.cluster.
+    hosts: dict = field(default_factory=dict)
 
     def values(self, roborobo: Path) -> dict[str, str]:
         """Placeholder values for rendering the template."""
@@ -146,6 +148,7 @@ def load(repo: Path) -> Program:
         schedule=schedule,
         human_only=data.get("files", {}).get("human_only", list(DEFAULT_HUMAN_ONLY)),
         runs=DEFAULT_RUNS | data.get("runs", {}),
+        hosts=data.get("hosts", {}),
     )
 
 
@@ -167,6 +170,20 @@ def render_config(name: str, title: str, scientist: str, data_dir: str,
         "",
         "[files]",
         f"human_only = [{human}]",
+        "",
+        "# Clusters the agent may submit jobs to with `program submit`. For example:",
+        "# [hosts.hatteras]",
+        '# kind = "slurm"',
+        '# ssh = "hatteras"                # an alias in ~/.ssh/config',
+        '# workdir = "/projects/<alloc>/roborobo"',
+        "# slots = 8                       # most jobs queued or running at once",
+        '# partition = "batch"',
+        '# time = "2:00:00"                # defaults; `program submit` can override',
+        '# mem = "16G"',
+        "# cpus = 1",
+        "# fetch_max_mb = 500              # bigger outputs stay on the cluster",
+        '# fetch_exclude = ["checkpoint*.npz"]  # never fetched',
+        '# env = {UV_CACHE_DIR = "/projects/<alloc>/uv-cache", UV_LINK_MODE = "copy"}',
         "",
     ]
     return "\n".join(lines)
