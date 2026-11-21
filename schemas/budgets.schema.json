@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/budgets.schema.json",
+  "title": "Budgets (budgets.yaml)",
+  "description": "The scientist's limits. Every rule is a field; comments in the file may give reasons but carry no rules. A resource name matches the key experiments use in cost_estimate / cost_actual, and has one or more limits.",
+  "type": "object",
+  "required": ["budgets"],
+  "additionalProperties": false,
+  "properties": {
+    "budgets": {
+      "type": ["object", "null"],
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"$ref": "#/$defs/limit"}
+      }
+    }
+  },
+  "$defs": {
+    "limit": {
+      "type": "object",
+      "required": ["per", "where"],
+      "additionalProperties": false,
+      "properties": {
+        "max": {"type": "number", "minimum": 0, "description": "Never more than this"},
+        "min": {"type": "number", "minimum": 0, "description": "Never less than this (a floor, such as free disk)"},
+        "per": {
+          "enum": ["instant", "run", "week", "program"],
+          "description": "instant: at any moment; run: one run or job; week: the last 7 days of experiment outcomes; program: all of them. week and program are summed from the ledger by program check; instant and run are the agent's to watch."
+        },
+        "where": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1},
+          "description": "Where the limit applies: local (the computer sessions run on) or a host named in program.toml [hosts]"
+        }
+      },
+      "oneOf": [{"required": ["max"]}, {"required": ["min"]}],
+      "if": {"required": ["min"]},
+      "then": {"properties": {"per": {"const": "instant"}}}
+    }
+  }
+}

@@ -47,8 +47,9 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
    appears verbatim, or as an unambiguous rounding of one, in a file under
    `evidence/` cited by that experiment. Untraceable numbers fail the check
    and the summary has to be fixed.
-6. **Budgets.** Sum `cost_actual` by resource and period against
-   `budgets.yaml`; report 50% / 80% crossings; fail if a registration would
+6. **Budgets.** `budgets.yaml` validates against its schema, names only
+   known places, and its limits per week or program cover every place; sum
+   `cost_actual` by resource and period against those limits; report 50% / 80% crossings; fail if a registration would
    exceed 100%.
 7. **Blockers are conserved.** Every open blocker is listed in the
    `open_blockers` of at least one of the latest night's summaries.

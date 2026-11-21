@@ -184,30 +184,64 @@ def blockers_carried(records: dict[str, list[dict]], summaries: list[tuple[str, 
     return [f"{where} doesn't list open blockers {', '.join(missing)}"] if missing else []
 
 
+LOCAL = "local"  # the computer sessions run on; other places are program.toml hosts
+SUMMED = ("week", "program")
+
+
 def budgets(program: Program, records: dict[str, list[dict]],
             now: datetime | None = None) -> tuple[list[str], list[str]]:
-    """Spending against budgets.yaml for resources summed from the ledger
-    (periods 'program' and 'week'); other periods are reported as not
-    checked here."""
+    """Check budgets.yaml against its schema and the program's hosts, and sum
+    spending from the ledger for limits per week and per program. Limits per
+    instant and per run are the agent's to watch; they are reported, not
+    summed."""
     path = program.repo / "budgets.yaml"
     if not path.exists():
         return ["budgets.yaml is missing"], []
-    limits = (yaml.safe_load(path.read_text()) or {}).get("budgets") or {}
+    try:
+        document = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as error:
+        return [f"budgets.yaml is not valid YAML: {error}"], []
+    errors = schema_errors(document, "budgets.schema.json")
+    if errors:
+        old = isinstance(document, dict) and any(
+            isinstance(spec, dict) and "limit" in spec
+            for spec in (document.get("budgets") or {}).values())
+        hint = (" (it uses the old {limit, period} form; each resource is now a list of "
+                "limits with max or min, per and on)") if old else ""
+        return [f"budgets.yaml{hint}: {e}" for e in errors], []
+    places = {LOCAL, *program.hosts}
     now = now or datetime.now(UTC)
     outcomes = [r for r in records.get("experiments.jsonl", []) if r["record"] == "outcome"]
     problems, report = [], []
-    for resource, spec in limits.items():
-        period, limit = spec["period"], float(spec["limit"])
-        if period not in ("program", "week"):
-            report.append(f"{resource}: per {period}, not summed from the ledger")
-            continue
-        since = now - timedelta(days=7) if period == "week" else None
-        spent = sum(r["cost_actual"].get(resource, 0.0) for r in outcomes
-                    if since is None or datetime.fromisoformat(r["at"]) >= since)
-        share = spent / limit if limit else float("inf")
-        report.append(f"{resource}: {spent:g} of {limit:g} per {period} ({share:.0%})")
-        if share > 1.0:
-            problems.append(f"{resource} is over budget: {spent:g} of {limit:g} per {period}")
+    for resource, limits in (document["budgets"] or {}).items():
+        for limit in limits:
+            where = limit["where"]
+            unknown = sorted(set(where) - places)
+            if unknown:
+                problems.append(f"budgets.yaml {resource}: where names {', '.join(unknown)}, "
+                                f"which is neither {LOCAL} nor a host in program.toml")
+                continue
+            bound, value = ("at most", limit["max"]) if "max" in limit else ("at least", limit["min"])
+            places_named = ", ".join(where)
+            if limit["per"] not in SUMMED:
+                report.append(f"{resource}: {bound} {value:g} per {limit['per']} on {places_named} "
+                              "(watched by the agent, not summed from the ledger)")
+                continue
+            missing = sorted(places - set(where))
+            if missing:
+                problems.append(f"budgets.yaml {resource}: a limit per {limit['per']} must "
+                                f"cover every place ({', '.join(sorted(places))}); cost "
+                                f"records don't say where they were spent, so one that "
+                                f"leaves out {', '.join(missing)} can't be checked")
+                continue
+            since = now - timedelta(days=7) if limit["per"] == "week" else None
+            spent = sum(r["cost_actual"].get(resource, 0.0) for r in outcomes
+                        if since is None or datetime.fromisoformat(r["at"]) >= since)
+            share = spent / value if value else float("inf")
+            report.append(f"{resource}: {spent:g} of {value:g} per {limit['per']} ({share:.0%})")
+            if share > 1.0:
+                problems.append(f"{resource} is over budget: {spent:g} of {value:g} "
+                                f"per {limit['per']}")
     return problems, report
 
 
