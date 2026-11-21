@@ -113,7 +113,10 @@ there is what {{scientist}} sees. Schema: `{{schemas}}/line.schema.json`.
   session ends.
 - Before starting jobs and at the end of the session, check free disk
   (`df -h ~`), the size of `{{data_dir}}` (`du -sh`), and memory
-  (`memory_pressure`), and stay within the limits in `budgets.yaml`. Delete
+  (`memory_pressure`), and stay within the limits in `budgets.yaml`. Each
+  limit says where it applies (`where`: `local` is this computer, other names
+  are hosts in `program.toml`) and whether it is a ceiling (`max`) or a
+  floor (`min`); a limit doesn't apply anywhere it doesn't name. Delete
   intermediate output nobody will use. Never delete evidence a ledger
   record points to.
 
@@ -166,8 +169,8 @@ background processes that outlive the run, and record them in your line's
 - Record each job in `{{data_dir}}/runs/active.jsonl` (experiment id,
   process id, command, start time, expected finish). Remove the entry when
   you collect the job.
-- Stay within the core and memory limits in `budgets.yaml`, counting jobs
-  started by earlier sessions.
+- Stay within the `budgets.yaml` limits `where: [local]` (cores,
+  memory, disk), counting jobs started by earlier sessions.
 
 ### On a cluster
 
