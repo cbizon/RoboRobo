@@ -111,7 +111,7 @@ def test_forged_local_approval_does_not_count(program, capsys):
     locally, without pushing, still fails: only the remote's tags count."""
     run("approve", "--repo", program)
     with (program / "budgets.yaml").open("a") as f:
-        f.write("  cpu_hours: {limit: 999999, period: week}\n")
+        f.write("  cpu_hours:\n    - {max: 999999, per: week, where: [local]}\n")
     import roborobo.approvals as ap
     from roborobo import config
     prog = config.load(program)
@@ -120,6 +120,60 @@ def test_forged_local_approval_does_not_count(program, capsys):
     git(program, "tag", "approved/20990101T000000Z")
     code, out = check(program, capsys)
     assert code == 1 and "budgets.yaml changed since approval" in out
+
+
+def budget_problems(program, text, hosts=""):
+    from roborobo import config
+    from roborobo.records import budgets, load_ledger
+    (program / "budgets.yaml").write_text(text)
+    if hosts:
+        with (program / "program.toml").open("a") as f:
+            f.write(hosts)
+    prog = config.load(program)
+    return budgets(prog, load_ledger(prog)[0])
+
+
+HATTERAS = '\n[hosts.hatteras]\nkind = "slurm"\nssh = "h"\nworkdir = "/w"\nslots = 1\n'
+
+
+def test_budgets_template_is_valid(program):
+    assert budget_problems(program, (program / "budgets.yaml").read_text()) == ([], [])
+
+
+def test_budgets_with_hosts(program):
+    problems, report = budget_problems(program, (
+        "budgets:\n"
+        "  cpu_hours:\n"
+        "    - {max: 4000, per: week, where: [local, hatteras]}\n"
+        "    - {max: 100, per: run, where: [local, hatteras]}\n"
+        "  cores:\n"
+        "    - {max: 10, per: instant, where: [local]}\n"
+        "  disk_free_gb:\n"
+        "    - {min: 40, per: instant, where: [local]}\n"), HATTERAS)
+    assert problems == []
+    assert "cpu_hours: 0 of 4000 per week (0%)" in report
+    assert ("disk_free_gb: at least 40 per instant on local (watched by the agent, "
+            "not summed from the ledger)") in report
+
+
+@pytest.mark.parametrize("text, message", [
+    ("budgets:\n  cpu_hours: {limit: 1, period: week}\n", "old {limit, period} form"),
+    ("budgets:\n  cpu_hours:\n    - {max: 1, per: week, where: [ashe]}\n",
+     "where names ashe, which is neither local nor a host"),
+    ("budgets:\n  cpu_hours:\n    - {max: 1, per: week, where: [local]}\n",
+     "must cover every place (hatteras, local)"),
+    ("budgets:\n  disk_free_gb:\n    - {min: 40, per: week, where: [local, hatteras]}\n",
+     "budgets.yaml: budgets/disk_free_gb/0"),
+    ("budgets:\n  cores:\n    - {max: 1, min: 0, per: instant, where: [local]}\n",
+     "budgets.yaml: budgets/cores/0"),
+    ("budgets:\n  cores:\n    - {max: 1, per: instant}\n", "'where' is a required property"),
+    ("budgets:\n  cores:\n    - {max: 1, per: instant, where: [local], note: x}\n",
+     "Additional properties are not allowed"),
+    ("budgets: [\n", "not valid YAML"),
+])
+def test_budget_rules_are_checked(program, text, message):
+    problems, _ = budget_problems(program, text, HATTERAS)
+    assert any(message in p for p in problems), problems
 
 
 def test_template_drift_fails_and_sync_fixes(program, capsys):
@@ -176,7 +230,8 @@ def test_ledger_is_append_only(program, capsys):
 
 
 def test_budget_over_limit_fails(program, capsys):
-    (program / "budgets.yaml").write_text("budgets:\n  cpu_hours: {limit: 1, period: program}\n")
+    (program / "budgets.yaml").write_text(
+        "budgets:\n  cpu_hours:\n    - {max: 1, per: program, where: [local]}\n")
     commit(program)
     run("approve", "--repo", program)
     append(program, "experiments.jsonl", registration("E0001"))

@@ -4,6 +4,24 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-21 (budgets, from sequel)
+
+- `budgets.yaml` has a schema, and every rule is a field. Sequel's file
+  carried rules in comments (which machine a limit covers, that the disk
+  floor is a floor), which nothing checks and the agent had to interpret;
+  that got worse once jobs could run on Hatteras.
+- Each resource is a list of limits: `max` or `min` (a floor, only per
+  `instant`), `per` (`instant`, `run`, `week`, `program`) and `where`
+  (`local`, the computer sessions run on, or hosts in `program.toml`).
+  `per_run_cpu_hours` becomes a second `cpu_hours` limit `per: run`.
+- `where`, not `on`: YAML reads a bare `on` as true.
+- `program check` validates the file, rejects unknown places, and rejects a
+  limit per week or program that leaves out a place, because cost records
+  don't say where they were spent, so such a limit couldn't be checked.
+  Limits per instant and per run are reported as the agent's to watch.
+- The old `{limit, period}` form fails with a message saying what changed;
+  programs convert their file and re-approve it.
+
 ## 2026-11-21
 
 - Jobs can run on a Slurm cluster: `program submit` and `program jobs`,
