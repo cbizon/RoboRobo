@@ -1,10 +1,21 @@
 # Always-on RoboRobo: lines as the unit of work
 
-Status: draft for discussion, revised 2026-11-18 after first review.
-Phase 1 is built (`program run-night`), with two changes from the plan
-below: lines commit on `main` instead of line branches, since they run one
-at a time and code already lives on shared `method/*` branches; and only
-instructed lines (and lines with open challenges) run. See `LOG.md`.
+Status: revised 2026-11-22. Built so far (see [How to get there](#how-to-get-there)
+for each phase):
+
+- **Phase 1** (`program run-night`), with two changes from the plan below:
+  lines commit on `main` instead of line branches, since they run one at a
+  time and code already lives on shared `method/*` branches; and only
+  instructed lines (and lines with open challenges) run.
+- **Jobs on a cluster, ahead of phase 3:** `program submit` and `program
+  jobs` on Hatteras (Slurm), run from the Mac. Sequel's long simulations
+  moved there on Nov 21.
+- **Data as artifacts**, which this design didn't have: every data folder,
+  here or on a cluster, is recorded in the ledger with a manifest, and
+  cluster outputs stay on the cluster.
+- **Structured budgets** that say where each limit applies.
+
+`LOG.md` has the reasons for each.
 
 ## Why change
 
@@ -43,7 +54,7 @@ small always-on service, a pod on Sterling, instead of scheduled sessions.
 - Each **role** (worker, checker, referee) is set to a backend and model in
   configuration, per program and overridable per line.
 - **Placement is per activity, not per line.** Answering one question may
-  take a simulation on Sterling, an analysis next to data on Ashe and a
+  take a simulation on Sterling, an analysis next to data on Hatteras and a
   quick check locally. Each job, and each agent run, says where it runs.
 - **The dashboard is where you review.** It shows what happened per line
   and what needs you, and a button on any line or run opens a Claude Code
@@ -72,6 +83,22 @@ From the first review:
 - No digests. The dashboard (the program map) is the review surface, with a
   button that opens a Claude Code thread for discussion. Scheduled-task
   threads go away.
+
+Since then (Nov 19 to 22), from running sequel:
+
+- Hatteras is the first compute host. Jobs go through `program submit`,
+  which ships code as git checkouts at recorded commits; hosts and their
+  limits are in `program.toml` (yours).
+- Data stays where it was made. Every data folder is an artifact in
+  `ledger/artifacts.jsonl` with a manifest of its files, wherever it
+  lives; deleting one is recorded too. This record lives in the program
+  repository, not the service database, because it is part of the research
+  record (see [Data](#data)).
+- Only small files come back from a cluster; anything else is fetched to
+  look at and removed after the run.
+- Each budget limit names where it applies (`where: [local, hatteras]`).
+- A registration names its host, and `program submit` refuses a job for
+  another host.
 
 ## Goals
 
@@ -113,7 +140,9 @@ blocker, line) keep their meaning. New ones:
 - **Role**: worker (does the line's work), checker, referee.
 - **Backend**: what carries out a role: an agent harness (Claude Agent SDK,
   Codex CLI, Claude Code headless) or a plain model API call.
-- **Host**: somewhere work can run: `sterling`, `ashe`, `local`.
+- **Host**: somewhere work can run: `hatteras` (built), `sterling`, `local`.
+- **Artifact**: a data folder, here or on a host, with a ledger record and a
+  manifest of its files.
 - **Placement**: which host a particular job or run uses, and why.
 - **Service**: the always-on process (`roborobo serve`), a pod on Sterling,
   that holds the inbox, timers and run records, starts runs and serves the
@@ -158,11 +187,11 @@ blocker, line) keep their meaning. New ones:
    dashboard), nothing worth saying, or a decision request (the line can't
    move without you). Decision requests sit at the top of the dashboard.
 
-The service state (inbox, timers, runs, jobs) lives outside the program
+The service state (inbox, timers, runs) lives outside the program
 repository, on the pod's volume. The program repository stays the record of
-the research; the service database is the record of what ran where and
-when, and can be rebuilt from the repository plus the clusters' job lists
-if lost.
+the research, including what data exists and where (artifacts). The
+service database is scheduling state only, and can be rebuilt from the
+repository plus the clusters' job lists if lost.
 
 ## Lines
 
@@ -289,25 +318,27 @@ different needs. So placement belongs to each piece of work.
 ### Hosts
 
 ```toml
-[hosts.sterling]
+[hosts.hatteras]           # built
+kind = "slurm"
+ssh = "hatteras"
+workdir = "/projects/<allocation>/roborobo"
+slots = 400
+fetch = ["*.json", "*.txt", "*.log", "*.csv", "*.md"]
+
+[hosts.sterling]           # planned
 kind = "kubernetes"         # pods in namespace bizon, started by the service
 slots = 20
 
-[hosts.ashe]
-kind = "<to confirm>"       # reached from the pod over SSH
-slots = 8
-
-[hosts.hatteras]
-kind = "slurm"              # built: `program submit` / `program jobs`
-slots = 8
-
-[hosts.local]
+[hosts.local]              # planned
 kind = "pull"               # your Mac asks the service for work
 slots = 2
 ```
 
-The service runs on Sterling, so Sterling jobs are Kubernetes Jobs it
-creates in your namespace. Ashe is reached over SSH from the pod. **Local**
+Hosts live in `program.toml` (yours, approved). The service runs on
+Sterling, so Sterling jobs will be Kubernetes Jobs it creates in your
+namespace. Hatteras is reached over SSH: from the Mac today, from the pod
+once the service exists (an open question below). Ashe, in the first
+draft, is dropped for now: Hatteras covers the need. **Local**
 can't be pushed to, since the pod can't reach your Mac: a small
 `roborobo agent` on the Mac polls the service for work placed on `local`,
 runs it, and reports back. While the Mac is asleep, local work waits, and
@@ -315,27 +346,67 @@ the dashboard says so.
 
 ### Jobs
 
-- Every job is started through one command, `program submit --host ashe
-  --experiment E0131 -- <job script>`, not raw `kubectl`, `ssh` or
-  `sbatch`. It records the job against its line and experiment, takes a
-  slot, and holds the credentials, so the agent never has them.
-- The experiment's registration (written before it runs, as now) names
-  where it will run and why: "Sterling, because 40 seeds × 6 h". So
-  placement is in the plan, and the checker can question it.
-- When a job ends, the service enqueues a `job_done` event for its line.
-  The service finds out by watching job status on each host; a job can also
-  report itself at the end of its script, but watching is the source of
-  truth.
-- A line submits jobs and ends its run. It wakes when they finish. No run
-  sits waiting on a cluster.
+Built for Slurm (`roborobo.cluster`):
+
+- Every job is started through one command, `program submit --host
+  hatteras --experiment E0131 -- <command>`, not raw `ssh` or `sbatch`. It
+  checks the experiment is registered for that host and the host has a free
+  slot, and records the job against its line and experiment.
+- The code goes as real git checkouts at recorded commits, pushed over SSH
+  to a bare repository on the host: the program's own (`code/`), more
+  revisions or repositories (`--tree engine=method/nudge`,
+  `--tree grapenuts=<clone>:main`), and uv path sources. No GitHub access
+  is needed there.
+- Inputs are artifacts (`--input A0123:out/loop`); one already on the host
+  is copied there, never through the Mac.
+- The registration names its host (`host`) and says why in its method, so
+  placement is in the plan and the checker can question it.
+- A line submits jobs and ends its run. No run sits waiting on a cluster.
+
+Still to do:
+
+- **Job-done events.** Today each line runs `program jobs` at the start of
+  its run, which polls `sacct`, mirrors small files and records ended jobs.
+  With the service, watching job status becomes the service's job and a
+  finished job is a `job_done` event that wakes its line.
+- **Sterling** as a `kubernetes` host.
+- **`program cancel`.**
+- **Credentials.** On the Mac the agent runs as you, so it could call `ssh`
+  or `sbatch` itself; only the brief says not to. In the service, only the
+  service holds the SSH key, and runs never see it.
+
+### Data
+
+Built (`roborobo.artifacts`). Everything in a program's data folder is one
+of four kinds, and `program check` fails on anything else:
+
+- **data**: what runs produce, here (`runs/<experiment>/`) or in a job's
+  run folder on a host. Every data folder is an artifact: a record in
+  `ledger/artifacts.jsonl` (where, experiment, line, job, code commits,
+  input artifacts) and a manifest of every file (sha256, bytes, path) in
+  `ledger/manifests/`. `program jobs` records cluster outputs when a job
+  ends; `program record` records local ones; `program delete` removes data
+  and records why, and refuses data that claims or outcomes cite.
+- **scratch**: `tmp/`. `program fetch A0123[:path]` copies cluster data into
+  `tmp/fetch/` to look at, and the night runner empties it after every run.
+- **code**: git repositories (worktrees, clones of other code).
+- **operational state**: `jobs/`, `logs/`, `map/`, `mirror/` (the small
+  files each `program jobs` copies back), and files directly in `runs/`.
+
+The record is JSONL in git, with manifests beside it, so it is diffable and
+travels with the repository; one record per folder, since a job can write
+thousands of files. Still open: deleting on a cluster isn't restricted to
+you by the tool (sequel's `DIRECTION.md` says the agent deletes nothing
+there), and local runs' provenance comes from the agent's `program record`
+flags rather than from a job record.
 
 ### Runs
 
 The agent's own runs need little compute, so by default they run in the
 service pod. A run can be placed elsewhere when it has to work next to
-something: analysing large outputs that live on Ashe, or using a tool only
-installed locally. Then the service starts the harness on that host (a pod
-on Sterling, an SSH session on Ashe, the local agent on the Mac) with the
+something: analysing large outputs that live on Hatteras, or using a tool
+only installed locally. Then the service starts the harness on that host (a
+pod on Sterling, a Slurm job on Hatteras, the local agent on the Mac) with the
 line's worktree, and reads back the result the same way.
 
 So the same line can run a simulation on Sterling, analyse its output with
@@ -347,7 +418,8 @@ it fits.
 To start, you do:
 
 - `lines/L0013/hosts.toml` (yours) lists the hosts a line may use, with
-  any limits ("ashe, at most 4 jobs at once").
+  any limits ("hatteras, at most 40 jobs at once"). Today the hosts are
+  program-wide, in `program.toml`; per-line lists are still to do.
 - Using a host not on the list is a decision request: the line says which
   host, for what, and why, and waits.
 - Once the record shows which choices you always approve, some can move to
@@ -355,7 +427,14 @@ To start, you do:
 
 ## Budgets
 
-`budgets.yaml` gains per-line limits beside the program limits: model spend
+Built: `budgets.yaml` has a schema and every rule is a field. Each resource
+is a list of limits with `max` or `min`, `per` (`instant`, `run`, `week`,
+`program`) and `where` (`local` or hosts), so a limit on the Mac's cores
+doesn't apply to Hatteras. `program check` sums limits per week and per
+program from the ledger; a summed limit must name every place, since cost
+records don't say where they were spent.
+
+Still to do: `budgets.yaml` gains per-line limits beside the program limits: model spend
 (dollars, per role), compute (core-hours per host), and runs per day. The
 service sums them from its run table and the ledger, shows them on the
 dashboard with warnings at 50% and 80%, and at 100% stops starting runs for
@@ -426,9 +505,11 @@ Unanswered questions take their stated default after a time you set
 - **Plans before results.** Unchanged; registration and outcome are still
   separate ledger records, now on a line branch, and merge order keeps them
   in order on `main`.
+- **Your data.** Every data folder is a recorded artifact, deleting one is
+  recorded, and cited data can't be deleted.
 - **Permissions.** Each worker backend gets the same deny rules RoboRobo
   renders now (no editing your files or RoboRobo's, no push, no approve, no
-  raw cluster access). Only the service pushes, with its own GitHub key.
+  raw cluster access; the last isn't enforced yet on the Mac). Only the service pushes, with its own GitHub key.
   Where a backend can't express a rule, `program check` at the end of the
   run catches it, and the merge to `main` doesn't happen.
 
@@ -439,7 +520,7 @@ New risks to watch:
   result, not just the branch.
 - An agent that proposes many lines to get more runs. Approval and the cap
   handle it.
-- The service holds keys for GitHub, model providers, Sterling and Ashe.
+- The service holds keys for GitHub, model providers, Sterling and Hatteras.
   They live in Kubernetes secrets, mounted only into the service, never
   into run pods.
 
@@ -450,12 +531,13 @@ New risks to watch:
   program clones and worktrees.
 - A service account that may create and watch Jobs and pods in your
   namespace, for Sterling jobs and placed runs.
-- Secrets: model API keys, a GitHub deploy key per program repository, an
-  SSH key for Ashe.
+- Secrets: model API keys (or a Claude Code token from `claude setup-token`
+  for runs that use Claude Code headless), a GitHub deploy key per program
+  repository, an SSH key for Hatteras.
 - The dashboard is served from the pod and reached the way you reach
   Sterling now (UNC VPN, then an ingress or port-forward).
-- Needs outbound access to GitHub, the model providers and Ashe. To check
-  with Sterling's network policy before building.
+- Needs outbound access to GitHub, the model providers and Hatteras. To
+  check with Sterling's network policy before building.
 - Its own failures are visible: a heartbeat on the dashboard, and the
   dashboard saying plainly when the service isn't answering.
 
@@ -477,7 +559,11 @@ hosts, each provider's own SDK for model calls, run under `uv`.
 
 Each phase is useful on its own, and the first tests the main idea cheaply.
 
-1. **Run one line at a time** (inside today's setup, on the Mac). Add
+1. **Run one line at a time** (inside today's setup, on the Mac). *Built,
+   without line branches.* Still to do from it: the rest of each line's
+   folder (`question.md`, `instruction.md`, `hosts.toml`, `reported.md`;
+   only `progress.md` exists, and instructions are one file per night), a
+   cap on active lines, and flagging idle lines. Add
    `program run-line L0013`: build the line's context, launch Claude Code
    headless in the line's worktree, run `program check`, merge. Add
    `lines/<id>/` and line branches. The nightly scheduled task becomes a
@@ -485,13 +571,17 @@ Each phase is useful on its own, and the first tests the main idea cheaply.
    whether separate lines work better, and whether branch per line holds
    up.
 2. **The dashboard and Discuss button**, still reading the repository. The
-   map becomes the review page and the debrief task is retired.
+   map becomes the review page and the debrief task is retired. *Not
+   started.*
 3. **The service on Sterling.** `roborobo serve` with the inbox, timers and
    dispatcher; `program submit` with Sterling jobs and job-done events;
-   line runs in the pod. The dashboard moves into the service.
-4. **More hosts and backends.** Ashe over SSH, the local agent on the Mac,
+   line runs in the pod. The dashboard moves into the service. *Not
+   started; `program submit` exists for Slurm, and its jobs need to become
+   events.*
+4. **More hosts and backends.** Sterling jobs, the local agent on the Mac,
    runs placed on hosts, roles in `program.toml`, a second worker harness,
-   a checker from another provider, per-line budgets.
+   a checker from another provider, per-line budgets. *Hatteras is built,
+   from the Mac.*
 
 sequel moves to each phase as it's built, as it did for the `program`
 command.
@@ -500,10 +590,12 @@ command.
 
 - Does the `claude://code/new` link behave on your Mac with the app
   already open? (A five-minute test, before phase 2.)
-- What kind of host is Ashe (Slurm, plain SSH, Kubernetes), and can a pod
-  on Sterling reach it?
+- Can a pod on Sterling reach Hatteras over SSH without an interactive
+  login (Duo)?
+- How do runs in the pod authenticate to Claude: an API key, or a token
+  from `claude setup-token`?
 - Does Sterling's network policy allow a long-running pod outbound access
   to GitHub and the model providers?
-- Does `local` mean your Mac, or is it enough to have Sterling and Ashe?
+- Does `local` mean your Mac, or is it enough to have Sterling and Hatteras?
 - Which placement decisions, if any, should move to the agent later, and
   on what evidence?
