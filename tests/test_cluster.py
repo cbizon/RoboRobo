@@ -295,6 +295,63 @@ def test_uncommitted_path_source_is_refused(program, tools):
         "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001", "--", "true")
 
 
+def other_repo(program, where):
+    """A separate git repository, as grapenuts is to sequel."""
+    repo = where / "other"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    (repo / "README").write_text("other code\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "other")
+    return repo
+
+
+def test_another_repository_from_the_data_folder(program, capsys):
+    other = other_repo(program, program.parent / "demo-data")
+    assert run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+               "--tree", f"other={other}:main", "--", "bash", "-c",
+               "cat ../other/README; git -C ../other branch --show-current") == 0
+    job = cluster.load_jobs(config.load(program))[0]
+    assert job["trees"]["other"] == {"repo": str(other.resolve()), "branch": "main",
+                                     "commit": git(other, "rev-parse", "HEAD").strip()}
+    assert run("jobs", "--repo", program) == 0
+    log = (program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out").read_text()
+    assert log.split() == ["other", "code", "main"]
+
+
+def test_another_repository_outside_the_data_folder_is_refused(program, tmp_path):
+    other = other_repo(program, tmp_path / "elsewhere")
+    assert "is not in the program's data folder" in run(
+        "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+        "--tree", f"other={other}:main", "--", "true")
+
+
+def test_another_repository_with_uncommitted_changes_is_refused(program):
+    other = other_repo(program, program.parent / "demo-data")
+    (other / "README").write_text("changed\n")
+    assert "commit first, since the job runs other's committed code" in run(
+        "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+        "--tree", f"other={other}:", "--", "true")
+
+
+def test_job_for_another_host_than_registered_is_refused(program):
+    registration = dict(REGISTRATION, experiment_id="E0002", host="local")
+    with (program / "ledger" / "experiments.jsonl").open("a") as ledger:
+        ledger.write(json.dumps(registration) + "\n")
+    git(program, "commit", "-q", "-am", "E0002 on the Mac")
+    assert "E0002 is registered to run on local, not hatteras" in run(
+        "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0002", "--", "true")
+
+
+def test_registration_may_name_its_host():
+    from roborobo.records import schema_errors
+    text = "long enough to be a real sentence"
+    registration = dict(REGISTRATION, host="hatteras", hypothesis=text, method=text,
+                        judged_by=text, falsified_if=text)
+    assert schema_errors(registration, "experiment.schema.json") == []
+    assert schema_errors(dict(registration, host=""), "experiment.schema.json")
+
+
 def test_parse_sacct():
     rows = cluster.parse_sacct("12|CANCELLED by 501|0:15|00:01:00|60|\n"
                                "13|OUT_OF_MEMORY|0:125|01:00:00|14400|c01\n")

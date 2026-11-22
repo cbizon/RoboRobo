@@ -4,6 +4,20 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-22 (from sequel)
+
+- Registrations can say where they run: an optional `host` field on
+  experiments. The brief asked for the host in the registration but the
+  schema had no field, so L0019 added `host` itself, `program check`
+  rejected the ledger, and the night stopped before L0020.
+- `program submit` refuses a job whose registration names another host, so
+  placement in the plan holds.
+- `--tree NAME=PATH:REV` ships another git repository, from the data
+  folder only, the way the program's own trees go. sequel's L0020
+  evaluates grapenuts, a separate repository, and its runs need Hatteras.
+  A colon can't appear in a git revision, so `NAME=REV` and
+  `NAME=PATH:REV` can't be confused.
+
 ## 2026-11-21 (budgets, from sequel)
 
 - `budgets.yaml` has a schema, and every rule is a field. Sequel's file
