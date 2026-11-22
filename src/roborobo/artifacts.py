@@ -246,9 +246,9 @@ def unrecorded(program: Program, artifacts: dict[str, dict] | None = None) -> li
                 continue
             if rel == "runs" and not entry.is_dir(follow_symlinks=False):
                 continue  # operational files such as active.jsonl
+            if (Path(entry.path) / ".git").exists():
+                continue  # code: a git repository, or a link to one
             if entry.is_dir(follow_symlinks=False):
-                if (Path(entry.path) / ".git").exists():
-                    continue  # code
                 holds_code = any((Path(child.path) / ".git").exists()
                                  for child in os.scandir(entry.path) if child.is_dir())
                 if path == "runs" or holds_code or any(c.startswith(path + "/") for c in covered):

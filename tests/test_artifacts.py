@@ -70,6 +70,7 @@ def test_scratch_code_and_operational_state_need_no_record(program):
     clone.mkdir(parents=True)
     git(clone, "init", "-q")
     make(clone / "code.py")
+    (data(program) / "worktrees" / "linked").symlink_to(clone)  # a link to code is code
     assert artifact_check(program) == ([], [])
 
 
