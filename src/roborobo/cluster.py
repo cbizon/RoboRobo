@@ -325,7 +325,7 @@ def check_inputs(program: Program, h: Host, refs: list[str]) -> list[dict]:
     found = []
     for ref in refs:
         item = artifacts.resolve_input(program, str(ref))
-        if item["artifact"]["host"] not in (artifacts.LOCAL, h.name):
+        if item["artifact"]["host"] not in (artifacts.here(), h.name):
             raise SystemExit(f"--input {ref}: {item['artifact']['artifact_id']} is on "
                              f"{item['artifact']['host']}, not here or on {h.name}")
         item["name"] = Path(item["sub"] or item["artifact"]["path"]).name
@@ -341,7 +341,7 @@ def send_inputs(program: Program, h: Host, run_dir: str, inputs: list[dict]) -> 
     remote(h, f"mkdir -p {q(run_dir + '/in')}")
     for item in inputs:
         source = artifacts.located(item["artifact"], program, item["sub"])
-        if item["artifact"]["host"] == artifacts.LOCAL:
+        if item["artifact"]["host"] == artifacts.here():
             rsync([source, f"{h.ssh}:{run_dir}/in/"], f"sending {source} to {h.name}")
         else:  # already on the cluster: a copy, so the job can't change the original
             remote(h, f"cp -a {q(source)} {q(run_dir + '/in/' + item['name'])}")
