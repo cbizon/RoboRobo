@@ -4,7 +4,9 @@ A job runs one command under ``sbatch`` in a run folder on the cluster::
 
     <workdir>/<program>/<experiment>/<UTC time>/
         code/      the program repository at one commit (the command runs here)
-        <tree>/    more checkouts: ``--tree engine=method/nudge``, and every
+        <tree>/    more checkouts: ``--tree engine=method/nudge``, another
+                   repository in the data folder with ``--tree NAME=PATH:REV``,
+                   and every
                    uv path source in pyproject.toml (``../research-programs``
                    lands at ``research-programs/``, so the path still resolves)
         in/        files sent with ``--input``
@@ -273,12 +275,32 @@ def registration(program: Program, experiment: str) -> dict:
 
 
 def parse_trees(program: Program, specs: list[str]) -> list[Tree]:
+    """``NAME=REV`` checks out REV of the program's repository; ``NAME=PATH:REV``
+    checks out REV of another git repository, which must be in the data
+    folder (a colon can't appear in a git revision, so the two can't be
+    confused)."""
     trees = []
+    root = data_dir(program).resolve()
     for spec in specs:
-        name, sep, rev = spec.partition("=")
-        if not sep or not TREE_NAME.fullmatch(name) or not rev:
-            raise SystemExit(f"--tree {spec!r}: give NAME=REV, e.g. engine=method/nudge")
-        trees.append(resolve(program.repo, name, rev))
+        name, sep, rest = spec.partition("=")
+        if not sep or not TREE_NAME.fullmatch(name) or not rest:
+            raise SystemExit(f"--tree {spec!r}: give NAME=REV (e.g. engine=method/nudge) or "
+                             "NAME=PATH:REV for another repository in the data folder")
+        if ":" not in rest:
+            trees.append(resolve(program.repo, name, rest))
+            continue
+        path, _, rev = rest.rpartition(":")
+        repo = Path(path).expanduser().resolve()
+        if not repo.is_relative_to(root):
+            raise SystemExit(f"--tree {spec!r}: {repo} is not in the program's data folder "
+                             f"{root}; clone it there first")
+        top = git(repo, "rev-parse", "--show-toplevel", check=False).strip()
+        if not top or Path(top).resolve() != repo:
+            raise SystemExit(f"--tree {spec!r}: {repo} is not the top of a git repository")
+        rev = rev or "HEAD"
+        if rev == "HEAD":
+            clean(repo, f"the job runs {repo.name}'s committed code")
+        trees.append(resolve(repo, name, rev))
     return trees
 
 
@@ -306,6 +328,9 @@ def submit(program: Program, host_name: str, experiment: str, command: list[str]
     if not command:
         raise SystemExit("nothing to run: give the command after --")
     reg = registration(program, experiment)
+    if reg.get("host", h.name) != h.name:
+        raise SystemExit(f"{experiment} is registered to run on {reg['host']}, not {h.name}; "
+                         "register a new experiment that supersedes it to move it")
     if rev == "HEAD":
         clean(program.repo, "the job runs the committed code")
     code = resolve(program.repo, "code", rev)

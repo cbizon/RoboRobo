@@ -173,7 +173,8 @@ def main(argv=None) -> None:
     sj.add_argument("--rev", default="HEAD", help="the commit whose code runs (default HEAD)")
     sj.add_argument("--tree", action="append", metavar="NAME=REV",
                     help="also check out REV of this repository at ../NAME, e.g. "
-                         "engine=method/nudge (repeatable)")
+                         "engine=method/nudge, or NAME=PATH:REV for another git "
+                         "repository in the data folder (repeatable)")
     sj.add_argument("--input", action="append", type=Path, metavar="PATH",
                     help="send this file or folder from the data folder; the job finds "
                          "it in $ROBOROBO_IN (repeatable)")
