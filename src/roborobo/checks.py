@@ -3,7 +3,7 @@ call between lines."""
 
 from __future__ import annotations
 
-from roborobo import render
+from roborobo import artifacts, render
 from roborobo.approvals import verify
 from roborobo.config import Program
 from roborobo.records import (blockers_carried, budgets, documents, ledger_consistency,
@@ -30,6 +30,10 @@ def check_program(program: Program, remote: str = "origin") -> tuple[list[str], 
     summaries, summary_problems = documents(program, "sessions", "session-summary.schema.json")
     _, review_problems = documents(program, "reviews", "review.schema.json")
     problems += summary_problems + review_problems + blockers_carried(records, summaries)
+    artifact_problems, artifact_notes = artifacts.check(program,
+                                                       records.get("artifacts.jsonl", []))
+    problems += artifact_problems
+    notes += artifact_notes
     budget_problems, budget_report = budgets(program, records)
     problems += budget_problems
     notes += [f"budget {line}" for line in budget_report]

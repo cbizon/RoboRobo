@@ -120,7 +120,6 @@ def program(tmp_path, slurm, tools):
     with (repo / "program.toml").open("a") as toml:
         toml.write(f'\n[hosts.hatteras]\nkind = "slurm"\nssh = "ht1"\n'
                    f'workdir = "{tmp_path / "cluster"}"\nslots = 2\nmem = "1G"\n'
-                   f'fetch_exclude = ["checkpoint*.npz"]\n'
                    f'env = {{UV_LINK_MODE = "copy"}}\n')
     (repo / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0"\n'
                                          'dependencies = ["tools"]\n\n[tool.uv.sources]\n'
@@ -137,7 +136,8 @@ def program(tmp_path, slurm, tools):
 
 
 def test_new_program_documents_hosts(program):
-    assert "# [hosts.hatteras]" in (program / "program.toml").read_text()
+    toml = (program / "program.toml").read_text()
+    assert "# [hosts.hatteras]" in toml and "\n# env = {" in toml and "\n# fetch = [" in toml
 
 
 def test_submit_then_collect(program, slurm, capsys):
@@ -156,15 +156,26 @@ def test_submit_then_collect(program, slurm, capsys):
     assert run("jobs", "--repo", program) == 0
     out = capsys.readouterr().out
     assert "ended   hatteras 1001 E0001 COMPLETED" in out and "2.0 CPU-h" in out
-    outputs = program.parent / "demo-data" / "runs" / "E0001" / "hatteras-1001"
-    assert (outputs / "out" / "result.txt").read_text() == "seed 7\n"
-    assert not (outputs / "out" / "checkpoint-0001.npz").exists()  # fetch_exclude
-    log = (outputs / "slurm-1001.out").read_text()
+    mirror = program.parent / "demo-data" / "mirror" / "E0001" / "hatteras-1001"
+    assert (mirror / "out" / "result.txt").read_text() == "seed 7\n"
+    assert not (mirror / "out" / "checkpoint-0001.npz").exists()  # not a small file
+    assert not (program.parent / "demo-data" / "runs").exists()  # outputs stay on the cluster
+    log = (mirror / "slurm-1001.out").read_text()
     assert "uv mode copy" in log and "hello from tools" in log
     assert f"code at {job['commit']} on main" in log  # a real checkout, on its branch
     recorded = json.loads((program / "evidence" / "E0001" / "hatteras-1001.json").read_text())
     assert recorded["state"] == "COMPLETED" and recorded["cpu_hours"] == 2.0
-    assert json.loads((outputs / "job.json").read_text()) == recorded
+    assert recorded["artifact_id"] == "A0001" and "-> A0001" in out
+
+    artifact = json.loads((program / "ledger" / "artifacts.jsonl").read_text())
+    assert artifact["host"] == "hatteras" and artifact["path"] == job["run_dir"]
+    assert artifact["provenance"] == "job" and artifact["line_id"] == "L0001"
+    assert artifact["code"]["code"]["commit"] == job["commit"]
+    assert artifact["job"] == {"host": "hatteras", "job_id": "1001", "state": "COMPLETED"}
+    manifest = (program / artifact["manifest"]).read_text().splitlines()
+    assert [row.split("\t")[2] for row in manifest] == [
+        "out/checkpoint-0001.npz", "out/result.txt", "slurm-1001.out"]
+    assert artifact["files"] == 3
 
     assert run("jobs", "--repo", program) == 0
     assert "no jobs in flight" in capsys.readouterr().out
@@ -176,7 +187,7 @@ def test_failed_job_is_reported_and_its_log_fetched(program, capsys):
     assert run("jobs", "--repo", program) == 1
     out = capsys.readouterr().out
     assert "ended FAILED (exit 3:0)" in out
-    log = program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out"
+    log = program.parent / "demo-data/mirror/E0001/hatteras-1001/slurm-1001.out"
     assert "broke" in log.read_text()
 
 
@@ -209,11 +220,11 @@ def test_big_outputs_stay_on_the_cluster(program, capsys):
     toml.write_text(toml.read_text().replace('mem = "1G"', 'mem = "1G"\nfetch_max_mb = 1'))
     git(program, "commit", "-q", "-am", "smaller fetch limit")
     run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001", "--",
-        "bash", "-c", 'head -c 3000000 /dev/zero > "$ROBOROBO_OUT/big"')
+        "bash", "-c", 'head -c 3000000 /dev/zero > "$ROBOROBO_OUT/big.json"')
     assert run("jobs", "--repo", program) == 1
-    assert "over fetch_max_mb=1; fetched only the log" in capsys.readouterr().out
+    assert "over fetch_max_mb=1; copied only the log" in capsys.readouterr().out
     assert (program / "evidence/E0001/hatteras-1001.json").exists()
-    assert not (program.parent / "demo-data/runs/E0001/hatteras-1001/out").exists()
+    assert not (program.parent / "demo-data/mirror/E0001/hatteras-1001/out").exists()
 
 
 def test_unknown_host_is_refused(program):
@@ -253,14 +264,16 @@ def test_engine_tree_and_inputs(program, capsys):
     start = program.parent / "demo-data" / "runs" / "E0000" / "start"
     start.mkdir(parents=True)
     (start / "checkpoint.npz").write_text("state\n")
+    assert run("record", "--repo", program, start.parent) == 0
     assert run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
                "--tree", "engine=method/nudge", "--input", start, "--", "bash", "-c",
                'cat ../engine/engine.txt "$ROBOROBO_IN/start/checkpoint.npz"; '
                'git -C ../engine branch --show-current; test ! -e engine.txt') == 0
     job = cluster.load_jobs(config.load(program))[0]
     assert job["trees"]["engine"]["branch"] == "method/nudge"
+    assert job["inputs"] == [{"artifact_id": "A0001", "path": "start"}]
     assert run("jobs", "--repo", program) == 0
-    log = (program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out").read_text()
+    log = (program.parent / "demo-data/mirror/E0001/hatteras-1001/slurm-1001.out").read_text()
     assert log.split() == ["nudge", "engine", "state", "method/nudge"]
 
 
@@ -272,14 +285,15 @@ def test_running_jobs_sync_progress(program, slurm, capsys):
     assert run("jobs", "--repo", program) == 0
     out = capsys.readouterr().out
     assert "running hatteras 1001 E0001 RUNNING" in out
-    outputs = program.parent / "demo-data/runs/E0001/hatteras-1001"
-    assert (outputs / "out" / "result.txt").read_text() == "seed 3\n"
+    mirror = program.parent / "demo-data/mirror/E0001/hatteras-1001"
+    assert (mirror / "out" / "result.txt").read_text() == "seed 3\n"
+    assert not (program / "ledger" / "artifacts.jsonl").read_text()  # not ended yet
     assert not (program / "evidence/E0001/hatteras-1001.json").exists()
 
 
 def test_inputs_must_come_from_the_data_folder(program, tmp_path):
     (tmp_path / "elsewhere.txt").write_text("x")
-    assert "is not under the program's data folder" in run(
+    assert "is not inside the program's data folder" in run(
         "submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
         "--input", tmp_path / "elsewhere.txt", "--", "true")
 
@@ -315,7 +329,7 @@ def test_another_repository_from_the_data_folder(program, capsys):
     assert job["trees"]["other"] == {"repo": str(other.resolve()), "branch": "main",
                                      "commit": git(other, "rev-parse", "HEAD").strip()}
     assert run("jobs", "--repo", program) == 0
-    log = (program.parent / "demo-data/runs/E0001/hatteras-1001/slurm-1001.out").read_text()
+    log = (program.parent / "demo-data/mirror/E0001/hatteras-1001/slurm-1001.out").read_text()
     assert log.split() == ["other", "code", "main"]
 
 

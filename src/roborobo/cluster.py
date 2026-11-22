@@ -9,7 +9,8 @@ A job runs one command under ``sbatch`` in a run folder on the cluster::
                    and every
                    uv path source in pyproject.toml (``../research-programs``
                    lands at ``research-programs/``, so the path still resolves)
-        in/        files sent with ``--input``
+        in/        inputs (``--input``): copies of recorded artifacts, from here
+                   or from earlier jobs on the same cluster
         out/       the job's outputs (``$ROBOROBO_OUT``)
         slurm-<job>.out
 
@@ -20,16 +21,16 @@ and code that asks git for its own commit works.
 Hosts are the scientist's: ``[hosts.<name>]`` in ``program.toml``, which is
 human-only and approved, so the agent can't add a host or raise its limits.
 
-A job's state lives in ``<data_dir>/jobs/<host>-<jobid>.json``. Each
-``program jobs`` syncs ``out/`` (less the host's ``fetch_exclude`` patterns,
-such as checkpoints) and the Slurm log to
-``<data_dir>/runs/<experiment>/<host>-<jobid>/``, for running jobs too, so
-progress is visible. When a job ends, its ``job.json`` (commits, command,
-resources, state, CPU-hours) is also written to
-``evidence/<experiment>/<host>-<jobid>.json``, so the record in git says
-where and how it ran. Every failure (a job that failed, timed out, ran out of
-memory or vanished; outputs too big to fetch) is reported and makes the
-command exit non-zero. Nothing is retried on its own.
+A job's state lives in ``<data_dir>/jobs/<host>-<jobid>.json``. A job's
+outputs stay on the cluster. Each ``program jobs`` copies only small files
+(the host's ``fetch`` patterns, such as ``*.json``) and the Slurm log into
+``<data_dir>/mirror/<experiment>/<host>-<jobid>/``, for running jobs too, so
+progress is visible. When a job ends, its run folder becomes an artifact
+(see ``roborobo.artifacts``): a record in ``ledger/artifacts.jsonl`` with a
+manifest of every file, the code commits and the inputs. Anything else is
+looked at with ``program fetch``, which copies into ``tmp/fetch/``. Every
+failure (a job that failed, timed out, ran out of memory or vanished) is
+reported and makes the command exit non-zero. Nothing is retried on its own.
 """
 
 from __future__ import annotations
@@ -45,8 +46,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from roborobo import artifacts
 from roborobo.config import Program
 from roborobo.gitutil import git, show
+from roborobo.records import next_id
 
 ACTIVE = {"PENDING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED", "CONFIGURING",
           "COMPLETING", "STAGE_OUT", "SIGNALING", "REQUEUE_HOLD", "REQUEUE_FED"}
@@ -58,6 +61,11 @@ SACCT_FIELDS = "JobID,State,ExitCode,Elapsed,CPUTimeRAW,NodeList"
 RESERVED = {"code", "in", "out"}
 TREE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 SSH = ["ssh", "-o", "BatchMode=yes"]
+DEFAULT_FETCH = ["*.json", "*.txt", "*.log", "*.csv", "*.md"]
+# A program's own records: uncommitted changes there don't change the code a
+# job runs, so they don't block submitting (program jobs writes some).
+RECORDS = ("ledger/", "evidence/", "sessions/", "reviews/", "lines/", "instructions/",
+           "PROGRAM.md")
 
 
 @dataclass
@@ -73,7 +81,9 @@ class Host:
     cpus: int = 1
     env: dict[str, str] = field(default_factory=dict)
     fetch_max_mb: int = 500
-    fetch_exclude: list[str] = field(default_factory=list)
+    # Small files mirrored from a job's out/ each `program jobs`; the rest
+    # stays on the cluster and is looked at with `program fetch`.
+    fetch: list[str] = field(default_factory=lambda: list(DEFAULT_FETCH))
 
 
 def host(program: Program, name: str) -> Host:
@@ -88,6 +98,9 @@ def host(program: Program, name: str) -> Host:
     for key in ("ssh", "workdir", "slots"):
         if key not in spec:
             raise SystemExit(f"[hosts.{name}] is missing {key}")
+    if "fetch_exclude" in spec:
+        raise SystemExit(f"[hosts.{name}] fetch_exclude is replaced by fetch, the patterns "
+                         "of small files to copy back (outputs now stay on the cluster)")
     if not spec["workdir"].startswith("/"):
         raise SystemExit(f"[hosts.{name}] workdir must be an absolute path on the cluster")
     try:
@@ -133,8 +146,10 @@ def resolve(repo: Path, name: str, rev: str) -> Tree:
     return Tree(name, repo, commit, branch)
 
 
-def clean(repo: Path, why: str) -> None:
-    dirty = git(repo, "status", "--porcelain", "--untracked-files=no").strip()
+def clean(repo: Path, why: str, ignore: tuple[str, ...] = ()) -> None:
+    lines = git(repo, "status", "--porcelain", "--untracked-files=no").splitlines()
+    dirty = "\n".join(line for line in lines
+                      if line.strip() and not line[3:].startswith(ignore)).strip()
     if dirty:
         raise SystemExit(f"{repo} has uncommitted changes to tracked files; commit first, "
                          f"since {why}:\n{dirty}")
@@ -304,26 +319,38 @@ def parse_trees(program: Program, specs: list[str]) -> list[Tree]:
     return trees
 
 
-def check_inputs(program: Program, inputs: list[Path]) -> list[Path]:
-    root = data_dir(program).resolve()
-    checked = []
-    for path in inputs:
-        path = Path(path).expanduser().resolve()
-        if not path.exists():
-            raise SystemExit(f"--input {path} does not exist")
-        if not path.is_relative_to(root):
-            raise SystemExit(f"--input {path} is not under the program's data folder {root}")
-        checked.append(path)
-    names = [p.name for p in checked]
+def check_inputs(program: Program, h: Host, refs: list[str]) -> list[dict]:
+    """Each input must be a recorded artifact (or part of one), here or on this
+    host; see ``artifacts.resolve_input``."""
+    found = []
+    for ref in refs:
+        item = artifacts.resolve_input(program, str(ref))
+        if item["artifact"]["host"] not in (artifacts.LOCAL, h.name):
+            raise SystemExit(f"--input {ref}: {item['artifact']['artifact_id']} is on "
+                             f"{item['artifact']['host']}, not here or on {h.name}")
+        item["name"] = Path(item["sub"] or item["artifact"]["path"]).name
+        found.append(item)
+    names = [item["name"] for item in found]
     if len(set(names)) != len(names):
         raise SystemExit(f"--input names must differ; they land side by side in in/: {names}")
-    return checked
+    return found
+
+
+def send_inputs(program: Program, h: Host, run_dir: str, inputs: list[dict]) -> None:
+    q = shlex.quote
+    remote(h, f"mkdir -p {q(run_dir + '/in')}")
+    for item in inputs:
+        source = artifacts.located(item["artifact"], program, item["sub"])
+        if item["artifact"]["host"] == artifacts.LOCAL:
+            rsync([source, f"{h.ssh}:{run_dir}/in/"], f"sending {source} to {h.name}")
+        else:  # already on the cluster: a copy, so the job can't change the original
+            remote(h, f"cp -a {q(source)} {q(run_dir + '/in/' + item['name'])}")
 
 
 def submit(program: Program, host_name: str, experiment: str, command: list[str],
            rev: str = "HEAD", time: str | None = None, mem: str | None = None,
            cpus: int | None = None, trees: list[str] = (),
-           inputs: list[Path] = ()) -> dict:
+           inputs: list[str] = ()) -> dict:
     h = host(program, host_name)
     if not command:
         raise SystemExit("nothing to run: give the command after --")
@@ -332,14 +359,14 @@ def submit(program: Program, host_name: str, experiment: str, command: list[str]
         raise SystemExit(f"{experiment} is registered to run on {reg['host']}, not {h.name}; "
                          "register a new experiment that supersedes it to move it")
     if rev == "HEAD":
-        clean(program.repo, "the job runs the committed code")
+        clean(program.repo, "the job runs the committed code", RECORDS)
     code = resolve(program.repo, "code", rev)
     all_trees = [code, *parse_trees(program, trees), *path_sources(program, code.commit)]
     names = [t.name for t in all_trees]
     clash = {n for n in names if names.count(n) > 1} | (set(names[1:]) & RESERVED)
     if clash:
         raise SystemExit(f"tree names clash or are reserved: {', '.join(sorted(clash))}")
-    sent = check_inputs(program, list(inputs))
+    sent = check_inputs(program, h, list(inputs))
     busy = [j for j in load_jobs(program) if j["host"] == h.name and not j.get("ended_at")]
     if len(busy) >= h.slots:
         raise SystemExit(f"{h.name} has all {h.slots} slots in use "
@@ -349,9 +376,7 @@ def submit(program: Program, host_name: str, experiment: str, command: list[str]
     run_dir = f"{h.workdir}/{program.name}/{experiment}/{submitted:%Y%m%dT%H%M%SZ}"
     for tree in all_trees:
         ship(h, tree, run_dir)
-    remote(h, f"mkdir -p {shlex.quote(run_dir + '/in')}")
-    for path in sent:
-        rsync([str(path), f"{h.ssh}:{run_dir}/in/"], f"sending {path} to {h.name}")
+    send_inputs(program, h, run_dir, sent)
     sbatch = {"time": time or h.time, "mem": mem or h.mem, "cpus": cpus or h.cpus}
     script = wrapper(program, h, experiment, run_dir, command, **sbatch)
     q = shlex.quote(f"{run_dir}/job.sh")
@@ -362,7 +387,7 @@ def submit(program: Program, host_name: str, experiment: str, command: list[str]
     job = {"host": h.name, "job_id": job_id, "experiment_id": experiment,
            "line_id": reg.get("line_id"), "commit": code.commit,
            "trees": {t.name: t.record() for t in all_trees},
-           "inputs": [str(p) for p in sent], "command": command, "sbatch": sbatch,
+           "inputs": [item["record"] for item in sent], "command": command, "sbatch": sbatch,
            "run_dir": run_dir, "submitted_at": stamp(submitted), "state": "PENDING"}
     save(program, job)
     return job
@@ -378,34 +403,56 @@ if os.path.isdir(out):
     total = 0
     for folder, _, files in os.walk(out):
         total += sum(os.path.getsize(os.path.join(folder, f)) for f in files
-                     if not any(fnmatch.fnmatch(f, p) for p in patterns))
+                     if any(fnmatch.fnmatch(f, p) for p in patterns))
 print("none" if total is None else total // 2**20, "log" if os.path.isfile(log) else "nolog")
 """
 
 
-def outputs_dir(program: Program, job: dict) -> Path:
-    return data_dir(program) / "runs" / job["experiment_id"] / f"{job['host']}-{job['job_id']}"
+def mirror_dir(program: Program, job: dict) -> Path:
+    return data_dir(program) / "mirror" / job["experiment_id"] / f"{job['host']}-{job['job_id']}"
 
 
 def sync(program: Program, h: Host, job: dict) -> str | None:
-    """Copy the job's outputs (less fetch_exclude) and log into the data folder.
-    Returns a problem if the outputs are too big to fetch."""
-    dest = outputs_dir(program, job)
+    """Copy the job's small files (the host's fetch patterns) and its log into
+    the mirror. Returns a problem if even those are over fetch_max_mb."""
+    dest = mirror_dir(program, job)
     dest.mkdir(parents=True, exist_ok=True)
     out, log = f"{job['run_dir']}/out", f"{job['run_dir']}/slurm-{job['job_id']}.out"
-    args = shlex.join([out, log, *h.fetch_exclude])
+    args = shlex.join([out, log, *h.fetch])
     size, has_log = remote(h, f"python3 - {args}", stdin=SIZE_SCRIPT.encode()).split()
     if has_log == "log":
-        rsync([f"{h.ssh}:{log}", f"{dest}/"], f"fetching {log} from {h.name}")
+        rsync([f"{h.ssh}:{log}", f"{dest}/"], f"copying {log} from {h.name}")
     if size == "none":
         return None
     if int(size) > h.fetch_max_mb:
-        return (f"{job['experiment_id']} job {job['job_id']} on {h.name}: outputs are {size} MB "
-                f"after fetch_exclude, over fetch_max_mb={h.fetch_max_mb}; fetched only the "
-                f"log. They are in {out}")
-    rsync([*(f"--exclude={p}" for p in h.fetch_exclude), f"{h.ssh}:{out}/", f"{dest}/out/"],
-          f"fetching {out} from {h.name}")
+        return (f"{job['experiment_id']} job {job['job_id']} on {h.name}: its small files "
+                f"({', '.join(h.fetch)}) come to {size} MB, over fetch_max_mb="
+                f"{h.fetch_max_mb}; copied only the log. Narrow the job's outputs or the "
+                "host's fetch patterns")
+    rsync(["--prune-empty-dirs", "--include=*/", *(f"--include={p}" for p in h.fetch),
+           "--exclude=*", f"{h.ssh}:{out}/", f"{dest}/out/"], f"copying {out} from {h.name}")
     return None
+
+
+def record_artifact(program: Program, h: Host, job: dict) -> str:
+    """Record an ended job's run folder (its out/ and Slurm log) as an artifact."""
+    run_dir = job["run_dir"]
+    targets = shlex.join([run_dir, "out", f"slurm-{job['job_id']}.out"])
+    text = remote(h, f"python3 - {targets}", stdin=artifacts.MANIFEST_SCRIPT.encode())
+    aid = next_id(program, "A")
+    record = {"record": "created", "artifact_id": aid, "at": stamp(now()), "by": "agent",
+              "host": h.name, "path": run_dir, "provenance": "job",
+              "experiment_id": job["experiment_id"],
+              "job": {"host": h.name, "job_id": job["job_id"], "state": job.get("state", "")},
+              "code": {name: tree for name, tree in job.get("trees", {}).items()}}
+    if job.get("line_id"):
+        record["line_id"] = job["line_id"]
+    inputs = [i for i in job.get("inputs", []) if isinstance(i, dict)]
+    if inputs:
+        record["inputs"] = inputs
+    record.update(artifacts.write_manifest(program, aid, 1, text))
+    artifacts.append(program, record)
+    return aid
 
 
 @dataclass
@@ -415,11 +462,35 @@ class Report:
     problems: list[str] = field(default_factory=list)
 
 
+def finish(program: Program, h: Host, job: dict, report: Report,
+           report_failure: bool = True) -> None:
+    """Record an ended job: its artifact, and its job record in evidence/."""
+    job["artifact_id"] = record_artifact(program, h, job)
+    job.setdefault("ended_at", stamp(now()))
+    record = Path("evidence") / job["experiment_id"] / f"{h.name}-{job['job_id']}.json"
+    job["record"] = str(record)
+    text = json.dumps(job, indent=2) + "\n"
+    (program.repo / record).parent.mkdir(parents=True, exist_ok=True)
+    (program.repo / record).write_text(text)
+    save(program, job)
+    report.ended.append(job)
+    if report_failure and job["state"] != SUCCEEDED:
+        report.problems.append(f"{job['experiment_id']} job {job['job_id']} on {h.name} ended "
+                               f"{job['state']} (exit {job.get('exit_code')}); log in "
+                               f"{job['mirror']}")
+
+
 def refresh(program: Program) -> Report:
-    """Ask each host about its unfinished jobs, sync their outputs, and record
-    the ones that ended."""
+    """Ask each host about its unfinished jobs, mirror their small files, and
+    record the ones that ended as artifacts."""
     report = Report()
-    open_jobs = [j for j in load_jobs(program) if not j.get("ended_at")]
+    jobs = load_jobs(program)
+    open_jobs = [j for j in jobs if not j.get("ended_at")]
+    # Jobs that ended before artifacts existed get theirs now.
+    for job in [j for j in jobs if j.get("ended_at") and not j.get("artifact_id")]:
+        h = host(program, job["host"])
+        job["mirror"] = str(mirror_dir(program, job))
+        finish(program, h, job, report, report_failure=False)  # reported when it ended
     for host_name in sorted({j["host"] for j in open_jobs}):
         h = host(program, host_name)
         mine = [j for j in open_jobs if j["host"] == host_name]
@@ -436,7 +507,7 @@ def refresh(program: Program) -> Report:
                 continue
             job.update(row)
             problem = None if row["state"] == "PENDING" else sync(program, h, job)
-            job["outputs"] = str(outputs_dir(program, job))
+            job["mirror"] = str(mirror_dir(program, job))
             if problem:
                 report.problems.append(problem)
             if row["state"] in ACTIVE:
@@ -445,18 +516,7 @@ def refresh(program: Program) -> Report:
                 report.active.append(job)
                 continue
             job["ended_at"] = stamp(now())
-            record = Path("evidence") / job["experiment_id"] / f"{host_name}-{job['job_id']}.json"
-            job["record"] = str(record)
-            text = json.dumps(job, indent=2) + "\n"
-            (program.repo / record).parent.mkdir(parents=True, exist_ok=True)
-            (program.repo / record).write_text(text)
-            (outputs_dir(program, job) / "job.json").write_text(text)
-            save(program, job)
-            report.ended.append(job)
-            if row["state"] != SUCCEEDED:
-                report.problems.append(f"{job['experiment_id']} job {job['job_id']} on "
-                                       f"{host_name} ended {row['state']} (exit "
-                                       f"{row['exit_code']}); log in {job['outputs']}")
+            finish(program, h, job, report)
     return report
 
 
@@ -464,10 +524,10 @@ def describe(report: Report) -> str:
     lines = []
     for job in report.ended:
         lines.append(f"ended   {job['host']} {job['job_id']} {job['experiment_id']} "
-                     f"{job['state']} {job['elapsed']} {job['cpu_hours']} CPU-h "
-                     f"-> {job['outputs']} (record {job['record']})")
+                     f"{job['state']} {job.get('elapsed', '')} {job.get('cpu_hours', '')} CPU-h "
+                     f"-> {job['artifact_id']} (small files in {job['mirror']})")
     for job in report.active:
-        where = f" -> {job['outputs']}" if job.get("synced_at") else ""
+        where = f" -> {job['mirror']}" if job.get("synced_at") else ""
         lines.append(f"running {job['host']} {job['job_id']} {job['experiment_id']} "
                      f"{job['state']} {job.get('elapsed', '')}{where}")
     if not lines:

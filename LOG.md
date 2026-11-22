@@ -4,6 +4,43 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-22 (artifacts, from sequel)
+
+- Data is recorded wherever it lives. Every data folder, on the Mac or in a
+  job's run folder on a cluster, is an artifact: a record in
+  `ledger/artifacts.jsonl` (where it is, what made it: experiment, line,
+  job, code commits, input artifacts) and a manifest of every file (sha256,
+  bytes, path) in `ledger/manifests/`. Deleting one is a record too. JSONL
+  in git with manifests beside it, not SQLite, so the record is diffable
+  and travels with the repository; one record per folder, not per file,
+  since one job can write thousands of files.
+- Everything in the data folder is data, scratch (`tmp/`), code (git
+  repositories) or operational state (`jobs/`, `logs/`, `map/`,
+  `mirror/`, files directly in `runs/`). `program check` fails on
+  anything else, and on a recorded folder that disappeared without
+  `program delete`. A recorded folder that changed is a note, since
+  running jobs write into theirs.
+- Cluster outputs stay on the cluster. `program jobs` copies only small
+  files (`fetch` patterns, `*.json` and the like) and logs into `mirror/`,
+  and records the job's run folder as an artifact when it ends, hashing
+  on the cluster. `fetch_exclude` is replaced by `fetch`: an allow-list
+  can't let a new big file type through by accident. Sequel's continued
+  loops had copied 1.5 GB back, mostly history the Mac already had.
+- `program fetch A0123[:path]` copies anything into `tmp/fetch/` to look
+  at; the night runner empties it after every run, so looking doesn't
+  junk up the Mac.
+- `program record` records local data (and new manifests as it grows);
+  `--backfill` records whatever exists, provenance unknown. `program
+  delete` removes a folder here or on a cluster and records why; cited
+  data (claims, outcomes) can't be deleted.
+- Inputs are artifacts: `--input A0123[:path]`, or a path inside a recorded
+  folder. An input already on the cluster is copied there, so continuing
+  from a cluster checkpoint never comes through the Mac.
+- Uncommitted changes to the program's records (ledger, evidence,
+  sessions, reviews, lines, instructions) no longer block `program
+  submit`; it guards the code a job runs, and `program jobs` writes
+  records.
+
 ## 2026-11-22 (from sequel)
 
 - Registrations can say where they run: an optional `host` field on

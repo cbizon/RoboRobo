@@ -1,7 +1,7 @@
 # Tooling
 
 Status (Nov 2026): `program new`, `sync`, `approve`, `check`, `map`,
-`next-id`, `run-night`, `submit` and `jobs` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7 and 8 are
+`next-id`, `run-night`, `submit`, `jobs`, `record`, `delete` and `fetch` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7, 8 and 9 are
 enforced; 3 is enforced as "an outcome follows its registration in the
 ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
 `program digest` and the `/program` skill aren't built; the debrief prompt
@@ -24,7 +24,10 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program next-id <E\|C\|D\|B\|L\|T>` | agent | Next free ledger id, so records don't collide. |
 | `program run-night` | launchd, each evening; human, to run a line now | Run the lines the night's instruction has a section for (and lines with open challenges), one at a time, each followed by the checker. `--dry-run` says which and why; `--line` runs only the named lines; `--night` sets the date. Reports to `<data_dir>/logs/<night>/night.md`. |
 | `program submit` | agent | Run one command as a Slurm job on a host in `program.toml` `[hosts]`, for a registered experiment. Code goes as git checkouts at recorded commits (`--tree NAME=REV` for more of this repository, `--tree NAME=PATH:REV` for another one in the data folder, uv path sources automatically), pushed over SSH; `--input` sends files from the data folder. Refuses uncommitted code, unregistered experiments, a registration naming another host, and full hosts. |
-| `program jobs` | agent, each run | Poll `sacct`; sync outputs (less `fetch_exclude`) and logs into `<data_dir>/runs/<E>/<host>-<job>/`, running jobs included; record ended jobs in `evidence/<E>/<host>-<job>.json`; exit non-zero on any failed, vanished or too-big job. |
+| `program jobs` | agent, each run | Poll `sacct`; copy small files (`fetch` patterns) and logs into `<data_dir>/mirror/`; record each ended job's run folder as an artifact (manifest hashed on the cluster) and its job record in `evidence/`; exit non-zero on any failed or vanished job. |
+| `program record` | agent, human | Record a data folder here as an artifact, or a new manifest as it grows; `--backfill` records everything unrecorded. |
+| `program delete` | agent, human | Delete an artifact, here or on a cluster, and record why; refused for cited data. |
+| `program fetch` | agent | Copy a cluster artifact, or part of it, into `tmp/fetch/` to look at; the night runner empties it after each run. |
 
 ### What `program check` enforces
 
@@ -54,6 +57,10 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 7. **Blockers are conserved.** Every open blocker is listed in the
    `open_blockers` of at least one of the latest night's summaries.
 8. **The session summary is complete** and has at most five questions.
+9. **Data is recorded.** Everything in the data folder is a recorded
+   artifact, scratch, code or operational state; recorded local artifacts
+   still exist unless deleted with `program delete`; manifests match their
+   recorded hashes.
 
 ## Skills
 

@@ -61,6 +61,7 @@ SEEDED = (
     "ledger/blockers.jsonl",
     "ledger/lines.jsonl",
     "ledger/terms.jsonl",
+    "ledger/artifacts.jsonl",
 )
 
 DEFAULT_HUMAN_ONLY = ["DIRECTION.md", "BRIEF.md", "budgets.yaml", CONFIG, "referee/**",
@@ -73,6 +74,7 @@ LEDGER = {
     "blockers.jsonl": ("blocker.schema.json", "blocker_id", "B"),
     "lines.jsonl": ("line.schema.json", "line_id", "L"),
     "terms.jsonl": ("term.schema.json", "term_id", "T"),
+    "artifacts.jsonl": ("artifact.schema.json", "artifact_id", "A"),
 }
 
 
@@ -181,8 +183,8 @@ def render_config(name: str, title: str, scientist: str, data_dir: str,
         '# time = "2:00:00"                # defaults; `program submit` can override',
         '# mem = "16G"',
         "# cpus = 1",
-        "# fetch_max_mb = 500              # bigger outputs stay on the cluster",
-        '# fetch_exclude = ["checkpoint*.npz"]  # never fetched',
+        '# fetch = ["*.json", "*.txt", "*.log", "*.csv", "*.md"]  # small files copied back',
+        "# fetch_max_mb = 500              # cap on those, and on `program fetch`",
         '# env = {UV_CACHE_DIR = "/projects/<alloc>/uv-cache", UV_LINK_MODE = "copy"}',
         "",
     ]

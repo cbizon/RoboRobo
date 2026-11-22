@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://renci.org/research-programs/schemas/artifact.schema.json",
+  "title": "Artifact record (ledger/artifacts.jsonl)",
+  "description": "A data folder: what runs produced, where it lives, where it came from, and when it was destroyed. `created` starts an artifact; `updated` records a new manifest after its files changed; `deleted` ends it. Each manifest (ledger/manifests/<id>-<n>.tsv) lists every file as sha256, bytes and path relative to the artifact's folder.",
+  "type": "object",
+  "required": ["record", "artifact_id", "at", "by"],
+  "properties": {
+    "record": {"enum": ["created", "updated", "deleted"]},
+    "artifact_id": {"$ref": "_common.schema.json#/$defs/id", "description": "A0001, A0002, ..."},
+    "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
+    "by": {"$ref": "_common.schema.json#/$defs/actor"},
+    "host": {"type": "string", "minLength": 1, "description": "local (the computer sessions run on) or a host in program.toml [hosts]"},
+    "path": {"type": "string", "minLength": 1, "description": "On local: relative to the program's data folder. On a host: the absolute path of the job's run folder."},
+    "provenance": {"enum": ["job", "recorded", "backfilled"], "description": "job: recorded by program jobs when the job ended; recorded: by program record; backfilled: recorded after the fact, where it came from is not known"},
+    "experiment_id": {"$ref": "_common.schema.json#/$defs/id"},
+    "line_id": {"$ref": "_common.schema.json#/$defs/id"},
+    "job": {
+      "type": "object",
+      "required": ["host", "job_id"],
+      "properties": {"host": {"type": "string"}, "job_id": {"type": "string"}, "state": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "code": {
+      "type": "object",
+      "description": "The code that made it: each checkout by name, with its repository, commit and branch",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["repo", "commit"],
+        "properties": {"repo": {"type": "string"}, "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "branch": {"type": ["string", "null"]}},
+        "additionalProperties": false
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Artifacts it was made from, with the part of each that was used",
+      "items": {
+        "type": "object",
+        "required": ["artifact_id", "path"],
+        "properties": {"artifact_id": {"$ref": "_common.schema.json#/$defs/id"}, "path": {"type": "string"}},
+        "additionalProperties": false
+      }
+    },
+    "files": {"type": "integer", "minimum": 0},
+    "bytes": {"type": "integer", "minimum": 0},
+    "manifest": {"type": "string", "pattern": "^ledger/manifests/A[0-9]{4}-[0-9]+\\.tsv$"},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reason": {"$ref": "_common.schema.json#/$defs/text", "description": "Why it was deleted"},
+    "note": {"type": "string"}
+  },
+  "allOf": [
+    {"if": {"properties": {"record": {"const": "created"}}},
+     "then": {"required": ["host", "path", "provenance", "files", "bytes", "manifest", "manifest_sha256"]}},
+    {"if": {"properties": {"record": {"const": "updated"}}},
+     "then": {"required": ["files", "bytes", "manifest", "manifest_sha256"]}},
+    {"if": {"properties": {"record": {"const": "deleted"}}},
+     "then": {"required": ["reason"]}}
+  ],
+  "additionalProperties": false
+}

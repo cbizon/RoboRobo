@@ -139,17 +139,28 @@ def run_agent(program: Program, prompt: str, minutes: float, log: Path) -> str |
     """Run the configured agent command; return what went wrong, if anything."""
     command = [*program.runs["agent"], prompt]
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("w") as out:
-        try:
-            done = subprocess.run(command, cwd=program.repo, stdin=subprocess.DEVNULL,
-                                  stdout=out, stderr=subprocess.STDOUT, timeout=minutes * 60)
-        except subprocess.TimeoutExpired:
-            return f"stopped after its limit of {minutes:g} minutes (log: {log})"
-        except FileNotFoundError:
-            return f"the agent command {command[0]!r} wasn't found"
+    try:
+        with log.open("w") as out:
+            try:
+                done = subprocess.run(command, cwd=program.repo, stdin=subprocess.DEVNULL,
+                                      stdout=out, stderr=subprocess.STDOUT,
+                                      timeout=minutes * 60)
+            except subprocess.TimeoutExpired:
+                return f"stopped after its limit of {minutes:g} minutes (log: {log})"
+            except FileNotFoundError:
+                return f"the agent command {command[0]!r} wasn't found"
+    finally:
+        empty_fetched(program)
     if done.returncode != 0:
         return f"exited with code {done.returncode} (log: {log})"
     return None
+
+
+def empty_fetched(program: Program) -> None:
+    """Copies fetched to look at (``program fetch``) never outlive the run."""
+    fetched = Path(program.data_dir).expanduser() / "tmp" / "fetch"
+    if fetched.exists():
+        shutil.rmtree(fetched)
 
 
 def uncommitted(program: Program) -> list[str]:
