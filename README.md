@@ -16,8 +16,8 @@ you can inspect.
 Working, with one program running on it (sequel, a granular-physics
 simulation program). Built: the `program` command (`new`, `sync`,
 `approve`, `check`, `map`, `next-id`, `run-night`, `submit` and `jobs`
-for Slurm jobs on Hatteras, and `record`, `delete` and `fetch` for data
-artifacts), the starting files
+for Slurm jobs on Hatteras, `record`, `delete` and `fetch` for data
+artifacts, and `serve`, the always-on service), the starting files
 (`template/`), the record formats (`schemas/`), the prompts for each line's
 run, its checker and the debrief, and a library for judging a candidate
 against a baseline across several quantities (`roborobo.judge`). Not built

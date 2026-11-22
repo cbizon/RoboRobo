@@ -1,0 +1,13 @@
+# The service's home: program clones, their data folders, the service
+# database, uv's cache and Claude Code's state. The namespace has about
+# 13 GiB of volume quota left (Nov 22).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: roborobo-home
+  labels: {app.kubernetes.io/part-of: roborobo}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: basic
+  resources:
+    requests: {storage: 10Gi}
