@@ -4,6 +4,16 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-22 (conversion, from sequel)
+
+- A symlink to a git repository in the data folder is code. Sequel's agent
+  linked `worktrees/research-programs` so method worktrees resolve their
+  `../research-programs` path source, and the coverage check called it
+  unrecorded data.
+- The brief says `$ROBOROBO_OUT` exists when a job starts. Six of L0019's
+  pilot jobs failed because the harness refuses an existing `--outdir`
+  and they passed `$ROBOROBO_OUT` itself.
+
 ## 2026-11-22 (artifacts, from sequel)
 
 - Data is recorded wherever it lives. Every data folder, on the Mac or in a
