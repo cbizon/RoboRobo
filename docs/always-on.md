@@ -327,7 +327,7 @@ fetch = ["*.json", "*.txt", "*.log", "*.csv", "*.md"]
 
 [hosts.sterling]           # planned
 kind = "kubernetes"         # pods in namespace bizon, started by the service
-slots = 20
+slots = 4                   # the namespace's CPU quota is 8 in all
 
 [hosts.local]              # planned
 kind = "pull"               # your Mac asks the service for work
@@ -536,8 +536,14 @@ New risks to watch:
   repository, an SSH key for Hatteras.
 - The dashboard is served from the pod and reached the way you reach
   Sterling now (UNC VPN, then an ingress or port-forward).
-- Needs outbound access to GitHub, the model providers and Hatteras. To
-  check with Sterling's network policy before building.
+- Needs outbound access to GitHub, the model providers and Hatteras.
+  Checked Nov 22 from a throwaway pod in `bizon`: GitHub, PyPI, Anthropic's
+  and OpenAI's APIs all answer, and Hatteras's SSH port answers with its
+  banner. The namespace's network policy limits only incoming traffic.
+- Resources: the namespace's quota is 8 CPUs in all (about 2 already
+  requested) and 128 GiB of volumes (115 GiB used). Enough for the service
+  and its runs, which need little; not a compute host. Long compute stays
+  on Hatteras.
 - Its own failures are visible: a heartbeat on the dashboard, and the
   dashboard saying plainly when the service isn't answering.
 
@@ -590,12 +596,15 @@ command.
 
 - Does the `claude://code/new` link behave on your Mac with the app
   already open? (A five-minute test, before phase 2.)
-- Can a pod on Sterling reach Hatteras over SSH without an interactive
-  login (Duo)?
+- Logging in to Hatteras from the pod: the network path works (checked
+  Nov 22), but it needs a key the service can use unattended. Chris's own
+  key has a passphrase kept in the Mac's Keychain, so the service needs its
+  own key, stored as a Kubernetes secret, and Hatteras must accept it
+  without Duo, as it does Chris's key from the Mac.
 - How do runs in the pod authenticate to Claude: an API key, or a token
   from `claude setup-token`?
-- Does Sterling's network policy allow a long-running pod outbound access
-  to GitHub and the model providers?
+- ~~Does Sterling's network policy allow a long-running pod outbound access
+  to GitHub and the model providers?~~ Yes (checked Nov 22).
 - Does `local` mean your Mac, or is it enough to have Sterling and Hatteras?
 - Which placement decisions, if any, should move to the agent later, and
   on what evidence?
