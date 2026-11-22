@@ -7,11 +7,15 @@
     program map       [--repo DIR]   write the program map, an HTML page
     program run-night [--repo DIR] [--night YYYY-MM-DD] [--line L0001 ...] [--dry-run]
                                      run tonight's lines, one at a time
-    program next-id E|C|D|B|L|T [--repo DIR]
+    program next-id E|C|D|B|L|T|A [--repo DIR]
     program submit --host H --experiment E [--rev REV] [--tree NAME=REV ...]
                    [--input PATH ...] [--time T] [--mem M] [--cpus N] [--repo DIR]
                    -- COMMAND...                run a job on a cluster
-    program jobs      [--repo DIR]   check jobs in flight; collect the ones that ended
+    program jobs      [--repo DIR]   check jobs in flight; record the ones that ended
+    program record PATH [--experiment E] [--line L] [--input REF ...] [--note TEXT]
+                                     record a data folder here (or its new manifest)
+    program delete A0123 --reason TEXT   delete a data folder, here or on a cluster
+    program fetch A0123[:PATH] [--max-mb N]   copy cluster data into tmp/fetch/ to look at
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from roborobo import cluster, config, mapview, night, render
+from roborobo import artifacts, cluster, config, mapview, night, render
 from roborobo.approvals import approve
 from roborobo.checks import check_program
 from roborobo.config import CONFIG
@@ -122,6 +126,34 @@ def cmd_jobs(args) -> int:
     return 1 if report.problems else 0
 
 
+def cmd_record(args) -> int:
+    program = config.load(args.repo)
+    if args.backfill:
+        for path in artifacts.unrecorded(program):
+            aid, _ = artifacts.record_local(program, path.rstrip("/"), by=args.by,
+                                            provenance="backfilled",
+                                            note="recorded after the fact; provenance unknown")
+            print(f"{aid} {path}")
+        return 0
+    if not args.path:
+        raise SystemExit("give a folder to record, or --backfill")
+    aid, what = artifacts.record_local(program, args.path, args.experiment, args.line,
+                                       args.input or [], args.note, args.by)
+    print(f"{what} {aid} for {artifacts.local_rel(program, args.path)}; commit the ledger")
+    return 0
+
+
+def cmd_delete(args) -> int:
+    where = artifacts.delete(config.load(args.repo), args.artifact, args.reason, args.by)
+    print(f"deleted {args.artifact} ({where}); commit the ledger")
+    return 0
+
+
+def cmd_fetch(args) -> int:
+    print(artifacts.fetch(config.load(args.repo), args.ref, args.max_mb))
+    return 0
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="program", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="command", required=True)
@@ -163,7 +195,7 @@ def main(argv=None) -> None:
                     help="say which lines would run, and why, without running them")
     rn.set_defaults(func=cmd_run_night)
     nid = sub.add_parser("next-id", help="next free ledger id")
-    nid.add_argument("letter", choices=["E", "C", "D", "B", "L", "T"])
+    nid.add_argument("letter", choices=["E", "C", "D", "B", "L", "T", "A"])
     nid.add_argument("--repo", type=Path, default=Path.cwd())
     nid.set_defaults(func=cmd_next_id)
     sj = sub.add_parser("submit", help="run a job on a cluster in program.toml [hosts]")
@@ -175,9 +207,10 @@ def main(argv=None) -> None:
                     help="also check out REV of this repository at ../NAME, e.g. "
                          "engine=method/nudge, or NAME=PATH:REV for another git "
                          "repository in the data folder (repeatable)")
-    sj.add_argument("--input", action="append", type=Path, metavar="PATH",
-                    help="send this file or folder from the data folder; the job finds "
-                         "it in $ROBOROBO_IN (repeatable)")
+    sj.add_argument("--input", action="append", metavar="REF",
+                    help="a recorded artifact, or part of one, the job starts from: "
+                         "A0123[:path] or a path in the data folder; it lands in "
+                         "$ROBOROBO_IN (repeatable)")
     sj.add_argument("--time", help="Slurm time limit, e.g. 6:00:00 (default: the host's)")
     sj.add_argument("--mem", help="memory, e.g. 16G (default: the host's)")
     sj.add_argument("--cpus", type=int, help="CPUs per task (default: the host's)")
@@ -188,6 +221,35 @@ def main(argv=None) -> None:
                         "<data_dir>/runs/, and record the ones that ended")
     jb.add_argument("--repo", type=Path, default=Path.cwd())
     jb.set_defaults(func=cmd_jobs)
+    actor = {"choices": ["agent", "human"], "default": "agent",
+             "help": "who is doing this (default agent)"}
+    rc = sub.add_parser("record", help="record a data folder here as an artifact, or a new "
+                        "manifest for one already recorded")
+    rc.add_argument("path", nargs="?", help="a folder in the data folder, e.g. runs/E0101")
+    rc.add_argument("--repo", type=Path, default=Path.cwd())
+    rc.add_argument("--experiment", help="default: from a runs/E0123 path")
+    rc.add_argument("--line", help="default: the experiment's line")
+    rc.add_argument("--input", action="append", metavar="REF",
+                    help="an artifact it was made from: A0123[:path] (repeatable)")
+    rc.add_argument("--note")
+    rc.add_argument("--by", **actor)
+    rc.add_argument("--backfill", action="store_true",
+                    help="record everything unrecorded in the data folder, provenance unknown")
+    rc.set_defaults(func=cmd_record)
+    dl = sub.add_parser("delete", help="delete a data folder, here or on a cluster, and "
+                        "record it")
+    dl.add_argument("artifact")
+    dl.add_argument("--reason", required=True)
+    dl.add_argument("--repo", type=Path, default=Path.cwd())
+    dl.add_argument("--by", **actor)
+    dl.set_defaults(func=cmd_delete)
+    ft = sub.add_parser("fetch", help="copy a cluster artifact, or part of it, into "
+                        "tmp/fetch/ to look at; emptied after each run")
+    ft.add_argument("ref", metavar="A0123[:PATH]")
+    ft.add_argument("--repo", type=Path, default=Path.cwd())
+    ft.add_argument("--max-mb", type=int, default=None,
+                    help="refuse anything bigger (default: the host's fetch_max_mb)")
+    ft.set_defaults(func=cmd_fetch)
     args = ap.parse_args(argv)
     sys.exit(args.func(args))
 

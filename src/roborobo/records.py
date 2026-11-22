@@ -252,4 +252,4 @@ def next_id(program: Program, letter: str) -> str:
             numbers = [int(json.loads(line)[id_field][1:])
                        for line in path.read_text().splitlines() if line.strip()]
             return f"{letter}{max(numbers, default=0) + 1:04d}"
-    raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B, L, T")
+    raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B, L, T, A")
