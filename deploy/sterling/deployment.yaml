@@ -25,7 +25,7 @@ spec:
       containers:
         - name: service
           # Build, push and pin the digest: see README.md.
-          image: ghcr.io/cbizon/roborobo:0.1-7efda3d@sha256:90b1c9b220a7abd149cf36075f07fb39e13d656dd5aaf0b134366bf9e9a4303b
+          image: ghcr.io/cbizon/roborobo:0.2-051f764@sha256:6f54b1f69dfbb7afc3ef2850b9f929c83759f42444b012b134a8df9881d45a1f
           env:
             - {name: PROGRAMS, value: "sequel=git@github.com:cbizon/OscillationOverthruster.git"}
             - {name: ROBOROBO_URL, value: "https://github.com/cbizon/RoboRobo.git"}
@@ -33,8 +33,11 @@ spec:
             - {name: GIT_NAME, value: "RoboRobo service"}
             - {name: GIT_EMAIL, value: "bizon@renci.org"}
             - {name: POLL_MINUTES, value: "5"}
+            - {name: DASHBOARD_PORT, value: "8080"}
             - name: CLAUDE_CODE_OAUTH_TOKEN
               valueFrom: {secretKeyRef: {name: claude-provider-credentials, key: CLAUDE_CODE_OAUTH_TOKEN}}
+          ports:
+            - {name: dashboard, containerPort: 8080}
           volumeMounts:
             - {name: home, mountPath: /Users/bizon}
             - {name: ssh, mountPath: /secrets/ssh, readOnly: true}

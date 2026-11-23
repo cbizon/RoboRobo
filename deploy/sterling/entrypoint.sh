@@ -13,6 +13,7 @@
 #   ROBOROBO_REF    the branch of RoboRobo to run
 #   GIT_NAME, GIT_EMAIL   the identity commits are made with
 #   POLL_MINUTES    how often to look at each program
+#   DASHBOARD_PORT  where the dashboard listens in the pod
 #   CLAUDE_CODE_OAUTH_TOKEN   from `claude setup-token`, for the agent runs
 #   /secrets/ssh/known_hosts  verified host keys for github.com and Hatteras
 #   /secrets/ssh/hatteras     the service's own key for Hatteras (optional
@@ -20,6 +21,7 @@
 set -eu
 : "${PROGRAMS:?name=git@github.com:owner/repo.git ...}"
 : "${ROBOROBO_URL:?}" "${ROBOROBO_REF:?}" "${GIT_NAME:?}" "${GIT_EMAIL:?}" "${POLL_MINUTES:?}"
+: "${DASHBOARD_PORT:?}"
 : "${CLAUDE_CODE_OAUTH_TOKEN:?from claude setup-token}"
 test -f /secrets/ssh/known_hosts || { echo "missing /secrets/ssh/known_hosts" >&2; exit 1; }
 
@@ -63,4 +65,4 @@ done
 
 # shellcheck disable=SC2086
 exec uv run --project "$roborobo" program serve $repos --state "$HOME/.roborobo" \
-  --poll-minutes "$POLL_MINUTES"
+  --poll-minutes "$POLL_MINUTES" --dashboard-host 0.0.0.0 --dashboard-port "$DASHBOARD_PORT"

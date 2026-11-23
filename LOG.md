@@ -4,6 +4,26 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (dashboard and security, from sequel)
+
+- The service writes a dashboard after every look and serves it
+  (`--dashboard-port`, a ClusterIP Service on Sterling, reached with
+  `kubectl port-forward`; no ingress, since the page has no login of its
+  own). Top: what needs the scientist (a pause and how to resume, proposed
+  lines, questions from each line's latest run, claims the checker doubts,
+  failed jobs, lines held by the limits). Then a row per active line: where
+  it stands, its last run, verdicts, jobs in flight, pending events, and a
+  Discuss link (`claude://code/new`) that opens a Code tab thread on the
+  line in the scientist's clone, which has the same path as the service's.
+  Each program's map is written beside it.
+- The morning debrief pulls first and reads the service's runs, not only a
+  night's report.
+- Sequel's GitHub repository has rulesets: only the admin can create, move
+  or delete `approved/*` tags, and `main` can't be force-pushed or deleted.
+  Agent runs share the pod, and so the deploy key, with the service; without
+  the tag rule a run could push a forged approval. Runs in their own pods,
+  without the keys, is the real fix and is next.
+
 ## 2026-11-22 (the service, phase 3)
 
 - `program serve`: an always-on service that looks at each program every
