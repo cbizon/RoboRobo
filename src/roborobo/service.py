@@ -44,7 +44,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from roborobo import cluster, config
+from roborobo import cluster, config, dashboard
 from roborobo.config import Program
 from roborobo.gitutil import git
 from roborobo.mapview import fold_lines
@@ -381,24 +381,30 @@ def write_status(state: Path, conn, looks: dict[str, list[str]]) -> None:
     (state / "status.md").write_text("\n".join(out))
 
 
-def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = False) -> None:
+def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = False,
+          dashboard_host: str = "127.0.0.1", dashboard_port: int = 8080) -> None:
     state = state.expanduser()
     conn = connect(state / "service.db")
+    if dashboard_port:
+        dashboard.serve_http(state, dashboard_host, dashboard_port)
+        print(f"dashboard on http://{dashboard_host}:{dashboard_port}/", flush=True)
     while True:
-        looks = {}
+        looks, errors, programs = {}, {}, []
         for repo in repos:
             try:
                 program = config.load(repo)
+                programs.append(program)
                 looks[program.name] = look(conn, program)
             except (RuntimeError, OSError, subprocess.SubprocessError):
                 # git, ssh or rsync failed (a host or the remote unreachable): shown in
-                # the status and tried again at the next look. Anything else is a bug
-                # and stops the service, so it is seen and restarted.
-                name = Path(repo).name
-                looks[name] = ["error (tried again at the next look):",
-                               *traceback.format_exc().strip().splitlines()[-6:]]
-        write_status(state, conn, looks)
-        for name, notes in looks.items():
+                # the status and on the dashboard, and tried again at the next look.
+                # Anything else is a bug and stops the service, so it is seen and
+                # restarted.
+                errors[Path(repo).name] = traceback.format_exc().strip().splitlines()[-6:]
+        write_status(state, conn, {**looks, **{n: ["error (tried again at the next look):",
+                                                    *lines] for n, lines in errors.items()}})
+        dashboard.write(state, conn, programs, looks, errors)
+        for name, notes in [*looks.items(), *errors.items()]:
             for note in notes:
                 print(f"{now_utc():%Y-%m-%d %H:%M} {name}: {note}", flush=True)
         if once:

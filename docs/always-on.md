@@ -374,8 +374,11 @@ Still to do:
 - **Sterling** as a `kubernetes` host.
 - **`program cancel`.**
 - **Credentials.** On the Mac the agent runs as you, so it could call `ssh`
-  or `sbatch` itself; only the brief says not to. In the service, only the
-  service holds the SSH key, and runs never see it.
+  or `sbatch` itself; only the brief says not to. In the service as built,
+  runs share the pod and can read its keys (the Hatteras key and the
+  program's deploy key). A GitHub ruleset stops anyone but you pushing
+  `approved/*` tags or rewriting `main`; the real fix is runs in their own
+  pods without the secret mounted.
 
 ### Data
 
@@ -579,8 +582,11 @@ Each phase is useful on its own, and the first tests the main idea cheaply.
    whether separate lines work better, and whether branch per line holds
    up.
 2. **The dashboard and Discuss button**, still reading the repository. The
-   map becomes the review page and the debrief task is retired. *Not
-   started.*
+   map becomes the review page and the debrief task is retired. *Started
+   (Nov 23), served by the service: what needs you, a row per line, Discuss
+   links, the map beside it. Not yet: answering simple things on the page
+   (approve a line, allow a host), "changed since you last looked", retiring
+   the debrief. The `claude://code/new` link is still untested on the Mac.*
 3. **The service on Sterling.** `roborobo serve` with the inbox, timers and
    dispatcher; `program submit` with Sterling jobs and job-done events;
    line runs in the pod. The dashboard moves into the service. *Started

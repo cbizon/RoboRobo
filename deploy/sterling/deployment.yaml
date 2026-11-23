@@ -33,8 +33,11 @@ spec:
             - {name: GIT_NAME, value: "RoboRobo service"}
             - {name: GIT_EMAIL, value: "bizon@renci.org"}
             - {name: POLL_MINUTES, value: "5"}
+            - {name: DASHBOARD_PORT, value: "8080"}
             - name: CLAUDE_CODE_OAUTH_TOKEN
               valueFrom: {secretKeyRef: {name: claude-provider-credentials, key: CLAUDE_CODE_OAUTH_TOKEN}}
+          ports:
+            - {name: dashboard, containerPort: 8080}
           volumeMounts:
             - {name: home, mountPath: /Users/bizon}
             - {name: ssh, mountPath: /secrets/ssh, readOnly: true}

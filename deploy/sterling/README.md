@@ -66,7 +66,7 @@ docker buildx build --platform linux/amd64 -t ghcr.io/cbizon/roborobo:0.1-$(git 
 Put the tag and digest the push prints into `deployment.yaml`, then:
 
 ```bash
-kubectl apply -n bizon -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml
+kubectl apply -n bizon -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml -f deploy/sterling/service.yaml
 kubectl logs -n bizon -f deploy/roborobo-service
 ```
 
@@ -79,6 +79,18 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 ```
 
 ## Day to day
+
+- **The dashboard:** what needs you (a pause, proposed lines, the latest
+  questions, doubted claims, failed jobs, lines held by the limits), then a
+  row per line with its last run, the checker's verdicts, jobs in flight and
+  a Discuss link that opens a Claude Code thread on that line in your clone.
+  It links to the full program map. From the Mac:
+
+  ```bash
+  kubectl port-forward -n bizon svc/roborobo-dashboard 8080:80
+  ```
+
+  then open <http://localhost:8080/>. It refreshes every minute.
 
 - **What it is doing:** the log, or the status file.
 

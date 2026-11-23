@@ -124,7 +124,12 @@ def test_a_changed_section_runs_again_with_a_numbered_summary(served, tmp_path):
     assert (served / "sessions" / f"{day}-L0001-2.json").exists()
 
 
-def test_runs_per_day_and_the_gap_between_them_are_limited(served, tmp_path):
+def test_runs_per_day_and_the_gap_between_them_are_limited(served, tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    noon = datetime.now(ZoneInfo("America/New_York")).replace(hour=12, minute=0, second=0,
+                                                             microsecond=0)
+    monkeypatch.setattr(service, "now_utc", lambda: noon)  # no midnight inside the test
     toml = served / "program.toml"
     toml.write_text(toml.read_text().replace("min_minutes_between_runs = 0",
                                              "min_minutes_between_runs = 60\n"
@@ -237,3 +242,64 @@ def test_an_ended_job_starts_its_lines_run(served, tmp_path, slurm):  # noqa: F8
     assert done["line"] == "L0001"
     assert "job hatteras-1001 (E0001) ended COMPLETED, artifact A0001" in prompts(tmp_path)[0]
     assert "Record ended jobs: hatteras-1001" in git(served, "log", "--format=%s")
+
+
+def dashboard_page(served, tmp_path, db, notes=()):
+    from roborobo import dashboard
+    program = config.load(served)
+    path = dashboard.write(tmp_path / "state", db, [program], {"demo": list(notes)}, {})
+    return path.read_text()
+
+
+def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
+    from urllib.parse import parse_qs, urlparse
+    import html
+    import re
+    db = conn(tmp_path)
+    look(served, db)
+    day = instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
+    look(served, db)
+    page = dashboard_page(served, tmp_path, db)
+    assert "<b>L0002 proposed</b> by the agent: Spare heater. One is one sample." in page
+    assert "<b>L0001</b><br>Heater" in page and "<b>L0003</b><br>Fan" in page
+    assert "<b>L0002</b><br>" not in page  # only active lines get a row
+    assert f"{day}-L0001" in page and "A quiet run." in page and "no claims" in page
+    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", page).group(1))
+    query = parse_qs(urlparse(link).query)
+    assert query["folder"] == [str(served)]
+    assert "Run `git pull` first" in query["q"][0]
+    assert f"sessions/{day}-L0001.json" in query["q"][0]
+    assert (tmp_path / "state" / "dashboard" / "demo" / "map.html").exists()
+
+
+def test_the_dashboard_shows_a_pause_with_how_to_resume(served, tmp_path, monkeypatch):
+    db = conn(tmp_path)
+    look(served, db)
+    monkeypatch.setenv("STAND_IN_MODE", "dirty")
+    instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
+    look(served, db)
+    page = dashboard_page(served, tmp_path, db, ["job problem: E0001 job 7 ended FAILED"])
+    assert "<b>Paused</b>" in page and "program serve --resume demo" in page
+    assert "job problem: E0001 job 7 ended FAILED" in page
+
+
+def test_the_dashboard_is_served(tmp_path):
+    from urllib.request import urlopen
+    from roborobo import dashboard
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "index.html").write_text("<h1>hello</h1>")
+    server = dashboard.serve_http(tmp_path, "127.0.0.1", 0)
+    try:
+        port = server.server_address[1]
+        assert urlopen(f"http://127.0.0.1:{port}/").read() == b"<h1>hello</h1>"
+    finally:
+        server.shutdown()
+
+
+def test_later_runs_sort_after_earlier_ones():
+    from roborobo.dashboard import run_order
+    names = ["sessions/2026-11-23-L0013-2.json", "sessions/2026-11-23-L0013.json",
+             "sessions/2026-11-22-L0013-3.json"]
+    assert sorted(names, key=run_order) == [
+        "sessions/2026-11-22-L0013-3.json", "sessions/2026-11-23-L0013.json",
+        "sessions/2026-11-23-L0013-2.json"]

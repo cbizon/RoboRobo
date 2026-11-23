@@ -167,7 +167,8 @@ def cmd_serve(args) -> int:
         return 0
     if not args.repo:
         raise SystemExit("give at least one --repo")
-    service.serve([r.expanduser() for r in args.repo], state, args.poll_minutes, args.once)
+    service.serve([r.expanduser() for r in args.repo], state, args.poll_minutes, args.once,
+                  args.dashboard_host, args.dashboard_port)
     return 0
 
 
@@ -276,6 +277,10 @@ def main(argv=None) -> None:
     sv.add_argument("--poll-minutes", type=float, default=5)
     sv.add_argument("--once", action="store_true", help="look once and stop")
     sv.add_argument("--resume", metavar="NAME", help="let a paused program run again")
+    sv.add_argument("--dashboard-host", default="127.0.0.1",
+                    help="where the dashboard listens (0.0.0.0 in a pod)")
+    sv.add_argument("--dashboard-port", type=int, default=8080,
+                    help="the dashboard's port; 0 for no dashboard")
     sv.set_defaults(func=cmd_serve)
     args = ap.parse_args(argv)
     sys.exit(args.func(args))
