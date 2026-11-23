@@ -41,9 +41,9 @@ spec:
             - {name: ROBOROBO_RUNNER, value: kubernetes}
             - {name: ROBOROBO_VOLUME, value: roborobo-home}
             - {name: ROBOROBO_SERVICE_URL, value: "http://roborobo-api:8081"}
-            - {name: ROBOROBO_CLAUDE_SECRET, value: claude-provider-credentials}
+            - {name: ROBOROBO_CLAUDE_SECRET, value: roborobo-claude}
             - name: CLAUDE_CODE_OAUTH_TOKEN
-              valueFrom: {secretKeyRef: {name: claude-provider-credentials, key: CLAUDE_CODE_OAUTH_TOKEN}}
+              valueFrom: {secretKeyRef: {name: roborobo-claude, key: CLAUDE_CODE_OAUTH_TOKEN}}
           ports:
             - {name: dashboard, containerPort: 8080}
             - {name: api, containerPort: 8081}

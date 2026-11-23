@@ -50,10 +50,15 @@ launchctl bootout gui/$(id -u)/org.renci.roborobo.sequel
    Then delete the private key files from your Mac, or keep them somewhere
    safe; the cluster has its copy.
 
-5. **Claude**: the agent runs use `CLAUDE_CODE_OAUTH_TOKEN` from the existing
-   `claude-provider-credentials` secret (made for miner2049er from `claude
-   setup-token`). To use a separate token, create another secret the same
-   way and change the name in `deployment.yaml`.
+5. **Claude**: the service and its agent runs use their own token, made with
+   `claude setup-token` while signed in to the account they should draw on,
+   so they don't share miner2049er's allowance (on Nov 23 they did, hit the
+   limit, and ran Sonnet). Paste it at the prompt; it stays out of your
+   shell history:
+
+   ```bash
+   read -rs TOKEN && kubectl create secret generic roborobo-claude -n bizon --from-literal=CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" && unset TOKEN
+   ```
 
 6. **Your commit identity**: set `GIT_EMAIL` in `deployment.yaml`.
 
