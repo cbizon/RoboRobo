@@ -4,6 +4,31 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-22 (the service, phase 3)
+
+- `program serve`: an always-on service that looks at each program every
+  few minutes. It merges what the scientist pushed and pushes what runs
+  committed, then runs any line with a new event: a new or changed
+  instruction section, open challenges, or an ended Hatteras job. Runs
+  are the night's runs (worker, then checker), one line at a time, so no
+  branch per line yet.
+- Each event is acted on once, and the first look records what's already
+  there without running, so starting the service doesn't redo a night.
+- `[service]` in `program.toml` caps runs per line per day (3) and the gap
+  between them (60 min): with 400 slots, a run per ended job would be too
+  many.
+- A line's later runs in a day write numbered summaries and reviews.
+- A dirty repository, a failing check, an invalid record or a conflicting
+  merge pauses that program until `program serve --resume`. Errors
+  reaching git or a host are shown and retried; anything else crashes the
+  service, to be seen and restarted.
+- `ROBOROBO_HOST` names the machine a process runs on, so the artifact
+  check only verifies data recorded on that machine.
+- `deploy/sterling/`: an image with git, ssh, rsync, uv and Claude Code
+  (agent runs use a `claude setup-token` token, from the secret miner2049er
+  already has), a 10 GiB volume laid out like the Mac so rendered paths
+  match, and a one-replica Deployment.
+
 ## 2026-11-22 (conversion, from sequel)
 
 - A symlink to a git repository in the data folder is code. Sequel's agent

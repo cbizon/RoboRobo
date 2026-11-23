@@ -194,12 +194,20 @@ def after_run(program: Program, who: str, expected: str) -> tuple[list[str], boo
 
 
 def run_line(program: Program, night: date, lid: str, reasons: list[str],
-             instruction: str | None, logs: Path) -> tuple[LineResult, bool]:
+             instruction: str | None, logs: Path, stem: str | None = None,
+             worker_text: str | None = None, checker_text: str | None = None
+             ) -> tuple[LineResult, bool]:
+    """A line's worker run, then the checker on what it produced. The night
+    runner names files by night (``sessions/<night>-<line>.json``); the
+    service passes its own ``stem`` and prompts."""
     result = LineResult(lid, reasons)
     began = datetime.now()
-    summary = f"sessions/{night.isoformat()}-{lid}.json"
-    problem = run_agent(program, worker_prompt(program, night, lid, reasons, instruction),
-                        float(program.runs["worker_minutes"]), logs / f"{lid}-worker.log")
+    log_name = stem or lid  # the night's logs sit in a folder per night
+    stem = stem or f"{night.isoformat()}-{lid}"
+    summary = f"sessions/{stem}.json"
+    problem = run_agent(program,
+                        worker_text or worker_prompt(program, night, lid, reasons, instruction),
+                        float(program.runs["worker_minutes"]), logs / f"{log_name}-worker.log")
     if problem:
         result.problems.append(f"worker {problem}")
     problems, go_on = after_run(program, "worker", summary)
@@ -207,10 +215,10 @@ def run_line(program: Program, night: date, lid: str, reasons: list[str],
     if (program.repo / summary).exists():
         result.summary = summary
     if go_on and result.summary:
-        review = f"reviews/{night.isoformat()}-{lid}.json"
-        problem = run_agent(program, checker_prompt(program, night, lid),
+        review = f"reviews/{stem}.json"
+        problem = run_agent(program, checker_text or checker_prompt(program, night, lid),
                             float(program.schedule["checker_minutes"]),
-                            logs / f"{lid}-checker.log")
+                            logs / f"{log_name}-checker.log")
         if problem:
             result.problems.append(f"checker {problem}")
         problems, go_on = after_run(program, "checker", review)

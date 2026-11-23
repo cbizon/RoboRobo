@@ -40,7 +40,14 @@ from roborobo.records import next_id, schema_errors
 
 LEDGER_FILE = "ledger/artifacts.jsonl"
 MANIFESTS = "ledger/manifests"
-LOCAL = "local"
+LOCAL = "local"  # the default name of the machine a process runs on
+
+
+def here() -> str:
+    """The host this process runs on: ``local`` (the scientist's computer)
+    unless ``ROBOROBO_HOST`` names another, such as ``sterling`` for the
+    service. Data recorded on one machine is only checked on that machine."""
+    return os.environ.get("ROBOROBO_HOST", LOCAL)
 OPERATIONAL = {"tmp", "logs", "map", "jobs", "mirror"}
 IGNORED = {".DS_Store"}
 ARTIFACT_REF = re.compile(r"(A\d{4})(?::(.*))?")
@@ -191,8 +198,8 @@ def record_local(program: Program, path: Path | str, experiment: str | None = No
         raise SystemExit(f"{full} does not exist")
     check_data_path(program, rel)
     current = live(program)
-    same = [a for a in current.values() if a["host"] == LOCAL and a["path"] == rel]
-    overlap = [a for a in current.values() if a["host"] == LOCAL and a["path"] != rel and
+    same = [a for a in current.values() if a["host"] == here() and a["path"] == rel]
+    overlap = [a for a in current.values() if a["host"] == here() and a["path"] != rel and
                (rel.startswith(a["path"] + "/") or a["path"].startswith(rel + "/"))]
     if overlap:
         raise SystemExit(f"{rel} overlaps {', '.join(a['artifact_id'] + ' (' + a['path'] + ')' for a in overlap)}; "
@@ -211,7 +218,7 @@ def record_local(program: Program, path: Path | str, experiment: str | None = No
     experiment = experiment or (match[1] if match else None)
     line = line or registered_line(program, experiment)
     aid = next_id(program, "A")
-    record = {"record": "created", "artifact_id": aid, "at": now(), "by": by, "host": LOCAL,
+    record = {"record": "created", "artifact_id": aid, "at": now(), "by": by, "host": here(),
               "path": rel, "provenance": provenance}
     if experiment:
         record["experiment_id"] = experiment
@@ -234,7 +241,7 @@ def unrecorded(program: Program, artifacts: dict[str, dict] | None = None) -> li
     if not root.exists():
         return []
     artifacts = live(program) if artifacts is None else artifacts
-    covered = {a["path"] for a in artifacts.values() if a["host"] == LOCAL}
+    covered = {a["path"] for a in artifacts.values() if a["host"] == here()}
     found = []
 
     def walk(folder: Path, rel: str) -> None:
@@ -297,7 +304,7 @@ def check(program: Program, records: list[dict]) -> tuple[list[str], list[str]]:
     current = {aid: a for aid, a in fold(records).items() if "deleted" not in a}
     root = data_dir(program)
     for aid, artifact in current.items():
-        if artifact["host"] != LOCAL:
+        if artifact["host"] != here():
             continue
         folder = root / artifact["path"]
         if not folder.exists():
@@ -332,7 +339,7 @@ def resolve_input(program: Program, ref: str) -> dict:
         artifact = current[aid]
     else:
         rel = local_rel(program, ref)
-        holders = [a for a in current.values() if a["host"] == LOCAL and
+        holders = [a for a in current.values() if a["host"] == here() and
                    (rel == a["path"] or rel.startswith(a["path"] + "/"))]
         if not holders:
             raise SystemExit(f"{rel} is not in a recorded artifact; record it first with "
@@ -345,7 +352,7 @@ def resolve_input(program: Program, ref: str) -> dict:
 
 def located(artifact: dict, program: Program, sub: str = "") -> str:
     """Where an artifact (or a part of it) is, on its own host."""
-    base = (str(data_dir(program) / artifact["path"]) if artifact["host"] == LOCAL
+    base = (str(data_dir(program) / artifact["path"]) if artifact["host"] == here()
             else artifact["path"])
     return f"{base}/{sub}" if sub else base
 
@@ -366,7 +373,7 @@ def delete(program: Program, aid: str, reason: str, by: str = "agent") -> str:
         raise SystemExit(f"{aid} is cited in {', '.join(citing)}; cited data can't be deleted")
     artifact = current[aid]
     where = located(artifact, program)
-    if artifact["host"] == LOCAL:
+    if artifact["host"] == here():
         path = Path(where)
         if path.is_dir():
             shutil.rmtree(path)
@@ -389,7 +396,7 @@ def fetch(program: Program, ref: str, max_mb: int | None = None) -> Path:
                          "A0123 or A0123:out/summary.json")
     found = resolve_input(program, ref)
     artifact, sub = found["artifact"], found["sub"]
-    if artifact["host"] == LOCAL:
+    if artifact["host"] == here():
         raise SystemExit(f"{artifact['artifact_id']} is already here: {located(artifact, program, sub)}")
     h = cluster.host(program, artifact["host"])
     source = located(artifact, program, sub)

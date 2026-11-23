@@ -16,6 +16,9 @@
                                      record a data folder here (or its new manifest)
     program delete A0123 --reason TEXT   delete a data folder, here or on a cluster
     program fetch A0123[:PATH] [--max-mb N]   copy cluster data into tmp/fetch/ to look at
+    program serve --repo DIR [--repo DIR ...] [--state DIR] [--poll-minutes N] [--once]
+                                     the always-on service: run lines when there is work
+    program serve --resume NAME [--state DIR]   let a paused program run again
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from roborobo import artifacts, cluster, config, mapview, night, render
+from roborobo import artifacts, cluster, config, mapview, night, render, service
 from roborobo.approvals import approve
 from roborobo.checks import check_program
 from roborobo.config import CONFIG
@@ -154,6 +157,20 @@ def cmd_fetch(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    state = args.state.expanduser()
+    if args.resume:
+        conn = service.connect(state / "service.db")
+        if not service.resume(conn, args.resume):
+            raise SystemExit(f"{args.resume} isn't paused")
+        print(f"{args.resume} will run again at the next look")
+        return 0
+    if not args.repo:
+        raise SystemExit("give at least one --repo")
+    service.serve([r.expanduser() for r in args.repo], state, args.poll_minutes, args.once)
+    return 0
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="program", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="command", required=True)
@@ -250,6 +267,16 @@ def main(argv=None) -> None:
     ft.add_argument("--max-mb", type=int, default=None,
                     help="refuse anything bigger (default: the host's fetch_max_mb)")
     ft.set_defaults(func=cmd_fetch)
+    sv = sub.add_parser("serve", help="the always-on service: look at each program every few "
+                        "minutes and run lines that have new events")
+    sv.add_argument("--repo", type=Path, action="append",
+                    help="a program repository to serve (repeatable)")
+    sv.add_argument("--state", type=Path, default=Path("~/.roborobo"),
+                    help="where the service keeps its database and status.md")
+    sv.add_argument("--poll-minutes", type=float, default=5)
+    sv.add_argument("--once", action="store_true", help="look once and stop")
+    sv.add_argument("--resume", metavar="NAME", help="let a paused program run again")
+    sv.set_defaults(func=cmd_serve)
     args = ap.parse_args(argv)
     sys.exit(args.func(args))
 

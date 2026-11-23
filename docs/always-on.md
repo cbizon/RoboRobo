@@ -14,6 +14,8 @@ for each phase):
   here or on a cluster, is recorded in the ledger with a manifest, and
   cluster outputs stay on the cluster.
 - **Structured budgets** that say where each limit applies.
+- **Phase 3 started:** `program serve`, the event-driven service, with its
+  container and Sterling manifests in `deploy/sterling/`. Not deployed yet.
 
 `LOG.md` has the reasons for each.
 
@@ -581,9 +583,15 @@ Each phase is useful on its own, and the first tests the main idea cheaply.
    started.*
 3. **The service on Sterling.** `roborobo serve` with the inbox, timers and
    dispatcher; `program submit` with Sterling jobs and job-done events;
-   line runs in the pod. The dashboard moves into the service. *Not
-   started; `program submit` exists for Slurm, and its jobs need to become
-   events.*
+   line runs in the pod. The dashboard moves into the service. *Started
+   (Nov 22): `program serve` merges what you push, turns new or changed
+   instruction sections, open challenges and ended Hatteras jobs into
+   events, and runs each line with pending events, one at a time, within
+   `[service]` limits per line (runs a day, gap between runs). A run that
+   breaks the repository, an invalid record or a conflicting merge pauses
+   the program. Container and manifests in `deploy/sterling/`; runs use a
+   token from `claude setup-token`. Not yet: agent-set timers, Sterling
+   jobs, branch per line, the dashboard in the service.*
 4. **More hosts and backends.** Sterling jobs, the local agent on the Mac,
    runs placed on hosts, roles in `program.toml`, a second worker harness,
    a checker from another provider, per-line budgets. *Hatteras is built,
@@ -601,8 +609,9 @@ command.
   key has a passphrase kept in the Mac's Keychain, so the service needs its
   own key, stored as a Kubernetes secret, and Hatteras must accept it
   without Duo, as it does Chris's key from the Mac.
-- How do runs in the pod authenticate to Claude: an API key, or a token
-  from `claude setup-token`?
+- ~~How do runs in the pod authenticate to Claude?~~ With a token from
+  `claude setup-token` (Chris, Nov 22), the same way miner2049er's agents
+  do.
 - ~~Does Sterling's network policy allow a long-running pod outbound access
   to GitHub and the model providers?~~ Yes (checked Nov 22).
 - Does `local` mean your Mac, or is it enough to have Sterling and Hatteras?

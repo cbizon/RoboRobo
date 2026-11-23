@@ -1,7 +1,7 @@
 # Tooling
 
 Status (Nov 2026): `program new`, `sync`, `approve`, `check`, `map`,
-`next-id`, `run-night`, `submit`, `jobs`, `record`, `delete` and `fetch` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7, 8 and 9 are
+`next-id`, `run-night`, `submit`, `jobs`, `record`, `delete`, `fetch` and `serve` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7, 8 and 9 are
 enforced; 3 is enforced as "an outcome follows its registration in the
 ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
 `program digest` and the `/program` skill aren't built; the debrief prompt
@@ -28,6 +28,7 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program record` | agent, human | Record a data folder here as an artifact, or a new manifest as it grows; `--backfill` records everything unrecorded. |
 | `program delete` | agent, human | Delete an artifact, here or on a cluster, and record why; refused for cited data. |
 | `program fetch` | agent | Copy a cluster artifact, or part of it, into `tmp/fetch/` to look at; the night runner empties it after each run. |
+| `program serve` | the service (a pod on Sterling, or the Mac) | Every few minutes per program: merge what was pushed, push what runs committed, turn new instruction sections, open challenges and ended jobs into events, and run each line with pending events within `[service]` limits. Pauses a program on a broken run, invalid record or conflicting merge; `--resume NAME` lets it run again. |
 
 ### What `program check` enforces
 

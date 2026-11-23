@@ -91,6 +91,8 @@ class Program:
     runs: dict = field(default_factory=lambda: dict(DEFAULT_RUNS))
     # Clusters jobs may run on ([hosts.<name>]); see roborobo.cluster.
     hosts: dict = field(default_factory=dict)
+    # How the always-on service runs this program ([service]); see roborobo.service.
+    service: dict = field(default_factory=lambda: dict(DEFAULT_SERVICE))
 
     def values(self, roborobo: Path) -> dict[str, str]:
         """Placeholder values for rendering the template."""
@@ -128,6 +130,11 @@ SCHEDULE_KEYS = ("session_start", "session_end", "checker_minutes", "debrief")
 # run, in minutes.  The checker's limit is [schedule] checker_minutes.
 DEFAULT_RUNS = {"agent": ["claude", "-p"], "worker_minutes": 60}
 
+# Limits on the always-on service, per program: runs of one line in a day,
+# and the least time between the starts of one line's runs.  Every finished
+# job is an event, so without them a busy cluster would mean a run per job.
+DEFAULT_SERVICE = {"max_runs_per_line_per_day": 3, "min_minutes_between_runs": 60}
+
 
 def load(repo: Path) -> Program:
     repo = Path(repo).expanduser().resolve()
@@ -151,6 +158,7 @@ def load(repo: Path) -> Program:
         human_only=data.get("files", {}).get("human_only", list(DEFAULT_HUMAN_ONLY)),
         runs=DEFAULT_RUNS | data.get("runs", {}),
         hosts=data.get("hosts", {}),
+        service=DEFAULT_SERVICE | data.get("service", {}),
     )
 
 
