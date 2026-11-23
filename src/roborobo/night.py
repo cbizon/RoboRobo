@@ -16,6 +16,7 @@ and to standard output, and the exit code is 1 if anything went wrong.
 from __future__ import annotations
 
 import os
+import secrets
 import re
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
+from roborobo import kube, service_api
 from roborobo.checks import check_program
 from roborobo.config import Program
 from roborobo.gitutil import git
@@ -136,9 +138,20 @@ def checker_prompt(program: Program, night: date, lid: str) -> str:
 
 
 def run_agent(program: Program, prompt: str, minutes: float, log: Path) -> str | None:
-    """Run the configured agent command; return what went wrong, if anything."""
+    """Run the configured agent command; return what went wrong, if anything.
+    In the service (ROBOROBO_RUNNER=kubernetes) the run is a pod of its own,
+    without the service's keys; see roborobo.kube."""
     command = [*program.runs["agent"], prompt]
     log.parent.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("ROBOROBO_RUNNER") == "kubernetes":
+        token = secrets.token_hex(24)
+        service_api.CURRENT.set(token)
+        try:
+            return kube.run(kube.in_cluster(), kube.job_name(log.stem), command,
+                            str(program.repo), minutes, token, log)
+        finally:
+            service_api.CURRENT.set(None)
+            empty_fetched(program)
     try:
         with log.open("w") as out:
             try:

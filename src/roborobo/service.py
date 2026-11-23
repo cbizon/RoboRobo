@@ -45,7 +45,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from roborobo import cluster, config, dashboard
+from roborobo import cluster, config, dashboard, service_api
 from roborobo.config import Program
 from roborobo.gitutil import committed_at, git
 from roborobo.mapview import fold_lines
@@ -400,9 +400,13 @@ def write_status(state: Path, conn, looks: dict[str, list[str]]) -> None:
 
 
 def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = False,
-          dashboard_host: str = "127.0.0.1", dashboard_port: int = 8080) -> None:
+          dashboard_host: str = "127.0.0.1", dashboard_port: int = 8080,
+          api_port: int = 0) -> None:
     state = state.expanduser()
     conn = connect(state / "service.db")
+    if api_port:
+        service_api.serve("0.0.0.0", api_port, repos)
+        print(f"agent pods' commands on port {api_port}", flush=True)
     if dashboard_port:
         dashboard.serve_http(state, dashboard_host, dashboard_port)
         print(f"dashboard on http://{dashboard_host}:{dashboard_port}/", flush=True)

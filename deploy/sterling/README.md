@@ -66,7 +66,7 @@ docker buildx build --platform linux/amd64 -t ghcr.io/cbizon/roborobo:0.1-$(git 
 Put the tag and digest the push prints into `deployment.yaml`, then:
 
 ```bash
-kubectl apply -n bizon -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml -f deploy/sterling/service.yaml
+kubectl apply -n bizon -f deploy/sterling/rbac.yaml -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml -f deploy/sterling/service.yaml
 kubectl logs -n bizon -f deploy/roborobo-service
 ```
 
@@ -108,6 +108,19 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 - **Instructions and approvals** work as now: write and push from your Mac.
   The service merges them at its next look and runs the lines they name.
   Pull on your Mac to see what the runs did.
+
+## How runs are kept apart from the keys
+
+Each agent run is a Job of its own (`roborobo-<day>-<line>-...`), from the
+service's image, on the service's node. It mounts only `Projects/` and uv's
+cache from the volume and gets the Claude token; the service's keys are in a
+memory-only folder no run mounts. `program submit`, `jobs` and `fetch` in a
+run are sent to the service (`roborobo-api`), which runs them with its keys
+for the run holding the current token. Watch runs with
+
+```bash
+kubectl get jobs -n bizon -l app.kubernetes.io/component=agent
+```
 
 ## Limits
 

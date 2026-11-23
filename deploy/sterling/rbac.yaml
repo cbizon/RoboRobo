@@ -1,0 +1,33 @@
+# What the service may do in the namespace: start agent runs as Jobs, watch
+# them, read their pods and logs, and read its own pod (to start agent pods
+# from the same image). Agent pods get no service-account token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: roborobo-service
+  labels: {app.kubernetes.io/part-of: roborobo}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: roborobo-service
+  labels: {app.kubernetes.io/part-of: roborobo}
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: roborobo-service
+  labels: {app.kubernetes.io/part-of: roborobo}
+subjects:
+  - {kind: ServiceAccount, name: roborobo-service}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: roborobo-service
