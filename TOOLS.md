@@ -28,7 +28,7 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | `program record` | agent, human | Record a data folder here as an artifact, or a new manifest as it grows; `--backfill` records everything unrecorded. |
 | `program delete` | agent, human | Delete an artifact, here or on a cluster, and record why; refused for cited data. |
 | `program fetch` | agent | Copy a cluster artifact, or part of it, into `tmp/fetch/` to look at; the night runner empties it after each run. |
-| `program serve` | the service (a pod on Sterling, or the Mac) | Every few minutes per program: merge what was pushed, push what runs committed, turn new instruction sections, open challenges and ended jobs into events, and run each line with pending events within `[service]` limits. Pauses a program on a broken run, invalid record or conflicting merge; `--resume NAME` lets it run again. Writes and serves a dashboard (`--dashboard-port`). |
+| `program serve` | the service (a pod on Sterling, or the Mac) | Every few minutes per program: merge what was pushed, push what runs committed, turn new instruction sections, open challenges and ended jobs into events, and run each line with pending events within `[service]` limits. Runs each line in a worktree of its own (branch `line/<id>`), up to `max_parallel_lines` at once, and merges clean runs into main; a broken run or a conflicting or check-failing merge pauses that line, an invalid record or a conflict merging what was pushed pauses the program; `--resume NAME[:LINE]` lets it run again. Hands out ledger ids. Writes and serves a dashboard (`--dashboard-port`). |
 
 ### What `program check` enforces
 

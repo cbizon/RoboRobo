@@ -31,9 +31,30 @@ else:
            "headline": "A quiet run.", "experiments": [],
            "claims_changed": [], "questions": [], "budget": {}, "open_blockers": [],
            "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
-    if os.environ.get("STAND_IN_MODE") == "dirty":
+    mode = os.environ.get("STAND_IN_MODE")
+    if mode == "dirty":
         with open("PROGRAM.md", "a") as f:
             f.write("half-written\n")
+    if mode == "note":  # append a ledger record, as every real run does
+        with open("ledger/lines.jsonl", "a") as f:
+            f.write(json.dumps({"record": "note", "line_id": lid, "at": "2026-11-23T12:00:00Z",
+                                "by": "agent", "night": path[9:19],
+                                "text": f"{lid} ran in its own worktree."}) + "\n")
+        subprocess.run(["git", "add", "ledger/lines.jsonl"], check=True)
+    if mode == "register":  # an agent that registers E0001 without asking for an id
+        with open("ledger/experiments.jsonl", "a") as f:
+            f.write(json.dumps({"record": "registration", "experiment_id": "E0001",
+                                "at": "2026-11-23T12:00:00Z", "by": "agent", "rq_id": "RQ1",
+                                "line_id": lid, "hypothesis": "The heater causes the drift.",
+                                "method": "Turn the heater off and on.",
+                                "judged_by": "The drift check on both runs.",
+                                "falsified_if": "The drift stays with the heater off.",
+                                "cost_estimate": {"cpu_hours": 1}}) + "\n")
+        subprocess.run(["git", "add", "ledger/experiments.jsonl"], check=True)
+    if mode == "program-md":  # two lines rewriting the same lines of PROGRAM.md
+        with open("PROGRAM.md", "w") as f:
+            f.write(f"# Program\n\nWhere things stand, as {lid} sees it.\n")
+        subprocess.run(["git", "add", "PROGRAM.md"], check=True)
 with open(path, "w") as f:
     json.dump(doc, f)
 subprocess.run(["git", "add", path], check=True)
@@ -206,17 +227,21 @@ def test_challenges_start_a_run_and_proposed_lines_never_do(served, tmp_path):
     assert any("L0002 isn't active" in n for n in notes)
 
 
-def test_a_dirty_run_pauses_the_program_until_resumed(served, tmp_path, monkeypatch):
+def test_a_dirty_run_pauses_its_line_until_resumed(served, tmp_path, monkeypatch):
+    """Lines run in worktrees of their own, so a broken run holds up only its
+    line, not the program."""
     db = conn(tmp_path)
     look(served, db)
     monkeypatch.setenv("STAND_IN_MODE", "dirty")
     instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     notes = look(served, db)
-    assert "paused after that run" in notes
-    assert "paused" in look(served, db)[0]
-    git(served, "checkout", "PROGRAM.md")
-    assert run("serve", "--resume", "demo", "--state", tmp_path / "state") == 0
-    assert not any(note.startswith("paused") for note in look(served, db))
+    assert "paused L0001" in notes
+    instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n2. Still?\n")
+    assert any("L0001 is paused" in n for n in look(served, db))
+    git(served.parent / "demo.L0001", "checkout", "PROGRAM.md")
+    assert run("serve", "--resume", "demo:L0001", "--state", tmp_path / "state") == 0
+    monkeypatch.delenv("STAND_IN_MODE")
+    assert not any("paused" in note for note in look(served, db))
 
 
 def test_an_invalid_review_pauses_the_program(served, tmp_path):
@@ -303,7 +328,7 @@ def test_the_dashboard_shows_a_pause_with_how_to_resume(served, tmp_path, monkey
     instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     look(served, db)
     page = dashboard_page(served, tmp_path, db, ["job problem: E0001 job 7 ended FAILED"])
-    assert "<b>Paused</b>" in page and "program serve --resume demo" in page
+    assert "<b>L0001 paused</b>" in page and "program serve --resume demo:L0001" in page
     assert "job problem: E0001 job 7 ended FAILED" in page
 
 

@@ -15,6 +15,7 @@ Every file in a program repository has one owner:
 from __future__ import annotations
 
 import fnmatch
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,7 @@ TEMPLATE_OWNED = (
     "lines/README.md",
     "reviews/README.md",
     "sessions/README.md",
+    ".gitattributes",
 )
 
 # Template-owned files RoboRobo no longer renders; `program sync` removes them.
@@ -94,6 +96,17 @@ class Program:
     # How the always-on service runs this program ([service]); see roborobo.service.
     service: dict = field(default_factory=lambda: dict(DEFAULT_SERVICE))
 
+    @property
+    def home(self) -> Path:
+        """The program's main repository. For a line's worktree
+        (roborobo.lines) that is the repository it was made from, so files
+        rendered from the template are the same in every worktree."""
+        common = subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], capture_output=True, text=True)
+        if common.returncode != 0:  # not yet a git repository (program new renders first)
+            return self.repo
+        return Path(common.stdout.strip()).parent
+
     def values(self, roborobo: Path) -> dict[str, str]:
         """Placeholder values for rendering the template."""
         start_hour, start_minute = self.schedule["session_start"].split(":")
@@ -103,7 +116,7 @@ class Program:
             "name": self.name,
             "title": self.title,
             "scientist": self.scientist,
-            "repo": tilde(self.repo),
+            "repo": tilde(self.home),
             "data_dir": self.data_dir,
             "timezone": self.timezone,
             "roborobo": tilde(roborobo),
@@ -133,7 +146,9 @@ DEFAULT_RUNS = {"agent": ["claude", "-p"], "worker_minutes": 60}
 # Limits on the always-on service, per program: runs of one line in a day,
 # and the least time between the starts of one line's runs.  Every finished
 # job is an event, so without them a busy cluster would mean a run per job.
-DEFAULT_SERVICE = {"max_runs_per_line_per_day": 3, "min_minutes_between_runs": 60}
+DEFAULT_SERVICE = {"max_runs_per_line_per_day": 3, "min_minutes_between_runs": 60,
+                   # lines run at once, each in its own worktree (roborobo.lines)
+                   "max_parallel_lines": 1}
 
 
 def load(repo: Path) -> Program:

@@ -19,8 +19,10 @@ def show(repo: Path, rev: str, path: str) -> bytes | None:
 
 
 def history(repo: Path, path: str) -> list[str]:
-    """Commits that touched path, oldest first."""
-    out = git(repo, "rev-list", "--reverse", "HEAD", "--", path, check=False)
+    """Commits on the current branch's first-parent line that touched path,
+    oldest first. Following first parents, a merged line's records arrive in
+    the merge commit, after the branch's own earlier versions."""
+    out = git(repo, "rev-list", "--first-parent", "--reverse", "HEAD", "--", path, check=False)
     return [line for line in out.split() if line]
 
 

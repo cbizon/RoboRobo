@@ -217,6 +217,11 @@ reads other lines' records only on demand and never edits them.
 
 ### Branch per line
 
+*Built in the service (Nov 23); see `roborobo.lines`.* Worktrees sit beside
+the repository (`sequel.L0013`), main is merged into the line before a run
+rather than rebased, and line branches stay in the service's clone. Lines
+run at once up to `[service] max_parallel_lines`.
+
 Each line works on a branch `line/L0013` in its own worktree, so two lines'
 runs never touch the same checkout.
 
@@ -569,8 +574,8 @@ hosts, each provider's own SDK for model calls, run under `uv`.
 
 Each phase is useful on its own, and the first tests the main idea cheaply.
 
-1. **Run one line at a time** (inside today's setup, on the Mac). *Built,
-   without line branches.* Still to do from it: the rest of each line's
+1. **Run one line at a time** (inside today's setup, on the Mac). *Built;
+   line branches came with the service.* Still to do from it: the rest of each line's
    folder (`question.md`, `instruction.md`, `hosts.toml`, `reported.md`;
    only `progress.md` exists, and instructions are one file per night), a
    cap on active lines, and flagging idle lines. Add
