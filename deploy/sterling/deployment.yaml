@@ -25,13 +25,13 @@ spec:
       containers:
         - name: service
           # Build, push and pin the digest: see README.md.
-          image: ghcr.io/cbizon/roborobo:IMAGE_TAG@sha256:IMAGE_DIGEST
+          image: ghcr.io/cbizon/roborobo:0.1-7efda3d@sha256:90b1c9b220a7abd149cf36075f07fb39e13d656dd5aaf0b134366bf9e9a4303b
           env:
             - {name: PROGRAMS, value: "sequel=git@github.com:cbizon/OscillationOverthruster.git"}
             - {name: ROBOROBO_URL, value: "https://github.com/cbizon/RoboRobo.git"}
             - {name: ROBOROBO_REF, value: main}
             - {name: GIT_NAME, value: "RoboRobo service"}
-            - {name: GIT_EMAIL, value: "GIT_EMAIL_TO_SET"}
+            - {name: GIT_EMAIL, value: "bizon@renci.org"}
             - {name: POLL_MINUTES, value: "5"}
             - name: CLAUDE_CODE_OAUTH_TOKEN
               valueFrom: {secretKeyRef: {name: claude-provider-credentials, key: CLAUDE_CODE_OAUTH_TOKEN}}
