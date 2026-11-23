@@ -129,6 +129,12 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
                              f"{esc(paused['reason'])}<br><span class=meta>Fix it in the "
                              f"service's clone, then <code>program serve --resume "
                              f"{esc(program.name)}</code></span>"))
+    for held in conn.execute("SELECT line, at, reason FROM paused_lines WHERE program = ? "
+                             "ORDER BY line", (program.name,)):
+        needs.append(("bad", f"<b>{esc(held['line'])} paused</b> since {esc(held['at'][:16])}: "
+                             f"{esc(held['reason'])}<br><span class=meta>Fix it in the line's "
+                             f"worktree, then <code>program serve --resume "
+                             f"{esc(program.name)}:{esc(held['line'])}</code></span>"))
     for lid, line in sorted(lines.items()):
         if line.get("status") == "proposed":
             needs.append(("", f"<b>{esc(lid)} proposed</b> by the agent: "

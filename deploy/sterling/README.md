@@ -85,6 +85,14 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 
 ## Day to day
 
+- **Lines in parallel:** each line runs in its own worktree beside the
+  program (`/Users/bizon/Projects/experiments/sequel.L0019`, branch
+  `line/L0019`), and the service merges clean runs into main. Set
+  `[service] max_parallel_lines` in the program's `program.toml` to run
+  several at once (each agent pod asks for 1 CPU of the namespace's 8). A
+  line paused by a conflict is fixed in its worktree and resumed with
+  `program serve --resume sequel:L0019`.
+
 - **The dashboard:** what needs you (a pause, proposed lines, the latest
   questions, doubted claims, failed jobs, lines held by the limits), then a
   row per line with its last run, the checker's verdicts, jobs in flight and

@@ -36,6 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from roborobo.config import Program
+from roborobo.gitutil import git, show
 from roborobo.records import next_id, schema_errors
 
 LEDGER_FILE = "ledger/artifacts.jsonl"
@@ -233,6 +234,27 @@ def record_local(program: Program, path: Path | str, experiment: str | None = No
     return aid, "created"
 
 
+def recorded_elsewhere(program: Program) -> set[str]:
+    """Local data folders recorded on the program's other branches: main and
+    every line's branch (roborobo.lines). The data folder is shared, so data a
+    line recorded but hasn't merged yet is still data, not something another
+    line's check should call unrecorded."""
+    refs = git(program.repo, "for-each-ref", "--format=%(refname)", "refs/heads/",
+               check=False).split()
+    paths: set[str] = set()
+    for ref in refs:
+        if not (ref.startswith("refs/heads/line/") or ref in ("refs/heads/main",
+                                                             "refs/heads/master")):
+            continue
+        text = show(program.repo, ref, LEDGER_FILE)
+        if not text:
+            continue
+        records = [json.loads(line) for line in text.decode().splitlines() if line.strip()]
+        paths |= {a["path"] for a in fold(records).values()
+                  if "deleted" not in a and a["host"] == here()}
+    return paths
+
+
 def unrecorded(program: Program, artifacts: dict[str, dict] | None = None) -> list[str]:
     """Paths in the data folder that are not data, scratch, code or
     operational state: the folders and files no artifact covers. Doesn't
@@ -242,6 +264,7 @@ def unrecorded(program: Program, artifacts: dict[str, dict] | None = None) -> li
         return []
     artifacts = live(program) if artifacts is None else artifacts
     covered = {a["path"] for a in artifacts.values() if a["host"] == here()}
+    covered |= recorded_elsewhere(program)
     found = []
 
     def walk(folder: Path, rel: str) -> None:

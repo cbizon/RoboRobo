@@ -73,8 +73,8 @@ class StandIn:
                 stand_in.created.append(job)
                 env = {e["name"]: e.get("value")
                        for e in job["spec"]["template"]["spec"]["containers"][0]["env"]}
-                stand_in.token_live_at_create = service_api.CURRENT.matches(
-                    env["ROBOROBO_RUN_TOKEN"])
+                stand_in.token = env["ROBOROBO_RUN_TOKEN"]
+                stand_in.token_live_at_create = service_api.ACTIVE.repo(stand_in.token)
                 self.reply(job)
 
             def do_DELETE(self):  # noqa: N802
@@ -140,21 +140,22 @@ def test_run_agent_uses_a_pod_in_the_service(program, tmp_path, monkeypatch):
     assert problem is None
     command = stand_in.created[0]["spec"]["template"]["spec"]["containers"][0]["command"]
     assert command[4:] == ["claude", "-p", "Run line L0001."]
-    assert stand_in.token_live_at_create is True  # the run's token works while it runs
-    assert not service_api.CURRENT.matches("anything")  # and not after
+    # the run's token works while it runs, for its own folder only, and not after
+    assert stand_in.token_live_at_create == program.resolve()
+    assert service_api.ACTIVE.repo(stand_in.token) is None
 
 
 @pytest.fixture
 def api(program):
-    server = service_api.serve("127.0.0.1", 0, [program])
+    server = service_api.serve("127.0.0.1", 0)
     url = f"http://127.0.0.1:{server.server_address[1]}"
     yield url
     server.shutdown()
-    service_api.CURRENT.set(None)
+    service_api.ACTIVE.remove("run-token")
 
 
 def test_a_cluster_command_is_run_by_the_service(program, api, monkeypatch, capsys):
-    service_api.CURRENT.set("run-token")
+    service_api.ACTIVE.add("run-token", program)
     monkeypatch.setenv("ROBOROBO_SERVICE_URL", api)
     monkeypatch.setenv("ROBOROBO_RUN_TOKEN", "run-token")
     assert run("jobs", "--repo", program) == 0
@@ -162,7 +163,7 @@ def test_a_cluster_command_is_run_by_the_service(program, api, monkeypatch, caps
 
 
 def test_the_service_refuses_a_wrong_token(program, api, monkeypatch, capsys):
-    service_api.CURRENT.set("run-token")
+    service_api.ACTIVE.add("run-token", program)
     monkeypatch.setenv("ROBOROBO_SERVICE_URL", api)
     monkeypatch.setenv("ROBOROBO_RUN_TOKEN", "a guess")
     assert run("jobs", "--repo", program) == 2
@@ -181,15 +182,15 @@ def post(url, body):
 
 
 def test_the_service_runs_only_allowed_commands_for_its_programs(program, api, tmp_path):
-    service_api.CURRENT.set("run-token")
+    service_api.ACTIVE.add("run-token", program)
     code, why = post(api, {"argv": ["approve"], "repo": str(program), "token": "run-token"})
-    assert code == 403 and "only check, fetch, jobs, submit" in why
+    assert code == 403 and "only check, fetch, jobs, next-id, submit" in why
     code, why = post(api, {"argv": ["delete", "A0001", "--reason", "x"], "repo": str(program),
                            "token": "run-token"})
     assert code == 403
     code, why = post(api, {"argv": ["jobs"], "repo": str(tmp_path), "token": "run-token"})
-    assert code == 403 and "isn't a program this service runs" in why
-    service_api.CURRENT.set(None)
+    assert code == 403 and "isn't this run's folder" in why
+    service_api.ACTIVE.remove("run-token")
     code, why = post(api, {"argv": ["jobs"], "repo": str(program), "token": "run-token"})
     assert code == 403  # nothing is running, so no token works
 
