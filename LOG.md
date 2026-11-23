@@ -4,6 +4,20 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (first agent runs on Sterling)
+
+- The first agent runs in their own pods stopped within two minutes:
+  Claude Code 2.1.326 ignores a project's `.claude/settings.json` (its
+  allow list and extra directories) until the folder is trusted, and an
+  agent pod's home starts empty. The pod now marks the program's folder
+  trusted in `~/.claude.json` before starting the agent; that folder's
+  settings are RoboRobo's rendering, which `program check` keeps
+  unchanged. Checked with a one-off pod: Bash, `uv run ... program` and
+  file writes worked.
+- Rendered deny rules are `Edit(...)` only: this Claude Code applies Edit
+  rules to every file-editing tool and warns that `Write(...)` rules match
+  nothing. Programs need `program sync`.
+
 ## 2026-11-23 (agent pods on Sterling)
 
 - The first agent pod on Sterling was never created: it asked for a 2Gi

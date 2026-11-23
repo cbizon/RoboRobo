@@ -109,6 +109,17 @@ def job_name(stem: str) -> str:
     return f"roborobo-{clean}-{int(time.time())}"
 
 
+# Claude Code ignores a project's .claude/settings.json (its allow list and
+# extra directories) until the folder is trusted, and an agent pod starts with
+# an empty home, so the pod trusts the program's folder before starting the
+# agent. That folder's settings are RoboRobo's rendering, which program check
+# keeps unchanged.
+TRUST = ('python3 -c "import json, os, sys; '
+         'open(os.path.expanduser(\'~/.claude.json\'), \'w\').write(json.dumps('
+         '{\'projects\': {sys.argv[1]: {\'hasTrustDialogAccepted\': True}}}))" "$PWD" '
+         '&& exec "$@"')
+
+
 def manifest(settings: Settings, name: str, command: list[str], workdir: str,
              minutes: float, run_token: str) -> dict:
     """The Job for one agent run: the volume's Projects/ and uv cache, a scratch
@@ -137,7 +148,8 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
         "securityContext": {"runAsNonRoot": True, "runAsUser": 7474, "runAsGroup": 7474,
                             "fsGroup": 7474, "seccompProfile": {"type": "RuntimeDefault"}},
         "containers": [{
-            "name": "agent", "image": settings.image, "command": command,
+            "name": "agent", "image": settings.image,
+            "command": ["sh", "-c", TRUST, "agent", *command],
             "workingDir": workdir, "env": env,
             "volumeMounts": [
                 {"name": "scratch", "mountPath": home},

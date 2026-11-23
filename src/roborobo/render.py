@@ -32,8 +32,9 @@ def settings(program: Program) -> str:
     what catch that."""
     protected = [*program.human_only, APPROVALS,
                  *(p for p in TEMPLATE_OWNED if p != ".claude/settings.json")]
-    deny = [f"{tool}({path})" for path in protected for tool in ("Edit", "Write")]
-    deny += ["Edit(.claude/**)", "Write(.claude/**)",
+    # Edit rules cover every file-editing tool; Write rules no longer match.
+    deny = [f"Edit({path})" for path in protected]
+    deny += ["Edit(.claude/**)",
              "Bash(git push:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)",
              "Bash(git rebase:*)", "Bash(git reset --hard:*)",
              "Bash(program approve:*)", "Bash(uv run program approve:*)",

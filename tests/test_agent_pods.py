@@ -41,7 +41,9 @@ def test_the_agent_pod_holds_no_keys():
     assert env["ROBOROBO_SERVICE_URL"]["value"] == "http://roborobo-api:8081"
     assert not any("SSH" in name or "GITHUB" in name for name in env)
     assert job["spec"]["activeDeadlineSeconds"] == 3600 and job["spec"]["backoffLimit"] == 0
-    assert container["image"] == "img@sha256:abc" and container["command"] == ["claude", "-p", "go"]
+    assert container["image"] == "img@sha256:abc"
+    assert container["command"][:2] == ["sh", "-c"] and container["command"][3:] == [
+        "agent", "claude", "-p", "go"]
     term = pod["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
     assert term["topologyKey"] == "kubernetes.io/hostname"
 
@@ -137,7 +139,7 @@ def test_run_agent_uses_a_pod_in_the_service(program, tmp_path, monkeypatch):
                               tmp_path / "logs" / "2026-11-23-L0001-worker.log")
     assert problem is None
     command = stand_in.created[0]["spec"]["template"]["spec"]["containers"][0]["command"]
-    assert command == ["claude", "-p", "Run line L0001."]
+    assert command[4:] == ["claude", "-p", "Run line L0001."]
     assert stand_in.token_live_at_create is True  # the run's token works while it runs
     assert not service_api.CURRENT.matches("anything")  # and not after
 
@@ -225,3 +227,20 @@ def test_a_pod_that_cannot_pull_its_image_fails_the_run(tmp_path):
                        tmp_path / "worker.log", sleep=lambda s: None, clock=lambda: next(ticks))
     assert "ImagePullBackOff: Back-off pulling image" in problem
     assert stand_in.deleted == ["roborobo-x"]
+
+
+def test_the_pod_trusts_the_program_folder_then_runs_the_agent(tmp_path, monkeypatch):
+    """Claude Code ignores a project's settings until the folder is trusted, and
+    the pod's home starts empty (the first runs on Sterling, Nov 23)."""
+    import subprocess
+    job = kube.manifest(settings(), "x", ["printf", "%s|", "an argument with spaces", "two"],
+                        "/repo", 1, "t")
+    command = job["spec"]["template"]["spec"]["containers"][0]["command"]
+    folder = tmp_path / "sequel"
+    folder.mkdir()
+    done = subprocess.run(command, cwd=folder, env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+                          capture_output=True, text=True, check=True)
+    assert done.stdout == "an argument with spaces|two|"
+    trusted = json.loads((tmp_path / ".claude.json").read_text())
+    assert trusted == {"projects": {str(folder.resolve()): {"hasTrustDialogAccepted": True}}} or \
+        trusted == {"projects": {str(folder): {"hasTrustDialogAccepted": True}}}
