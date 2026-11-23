@@ -15,7 +15,10 @@ spec:
       labels: {app.kubernetes.io/part-of: roborobo, app.kubernetes.io/component: service}
     spec:
       imagePullSecrets: [{name: registry-credentials}]
-      automountServiceAccountToken: false
+      # The service's own account (rbac.yaml), to start agent runs as pods of
+      # their own. Agent pods get no token, and no keys.
+      serviceAccountName: roborobo-service
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 7474
@@ -25,7 +28,7 @@ spec:
       containers:
         - name: service
           # Build, push and pin the digest: see README.md.
-          image: ghcr.io/cbizon/roborobo:0.2-051f764@sha256:6f54b1f69dfbb7afc3ef2850b9f929c83759f42444b012b134a8df9881d45a1f
+          image: ghcr.io/cbizon/roborobo:0.3-b2171cc@sha256:f126bc40ada3756f1afd0d409c21027350d2f395ec982cd7d4300cbc0ff0fa4c
           env:
             - {name: PROGRAMS, value: "sequel=git@github.com:cbizon/OscillationOverthruster.git"}
             - {name: ROBOROBO_URL, value: "https://github.com/cbizon/RoboRobo.git"}
@@ -34,13 +37,20 @@ spec:
             - {name: GIT_EMAIL, value: "bizon@renci.org"}
             - {name: POLL_MINUTES, value: "5"}
             - {name: DASHBOARD_PORT, value: "8080"}
+            - {name: API_PORT, value: "8081"}
+            - {name: ROBOROBO_RUNNER, value: kubernetes}
+            - {name: ROBOROBO_VOLUME, value: roborobo-home}
+            - {name: ROBOROBO_SERVICE_URL, value: "http://roborobo-api:8081"}
+            - {name: ROBOROBO_CLAUDE_SECRET, value: roborobo-claude}
             - name: CLAUDE_CODE_OAUTH_TOKEN
-              valueFrom: {secretKeyRef: {name: claude-provider-credentials, key: CLAUDE_CODE_OAUTH_TOKEN}}
+              valueFrom: {secretKeyRef: {name: roborobo-claude, key: CLAUDE_CODE_OAUTH_TOKEN}}
           ports:
             - {name: dashboard, containerPort: 8080}
+            - {name: api, containerPort: 8081}
           volumeMounts:
             - {name: home, mountPath: /Users/bizon}
             - {name: ssh, mountPath: /secrets/ssh, readOnly: true}
+            - {name: keys, mountPath: /run/roborobo}
           resources:
             requests: {cpu: 500m, memory: 2Gi, ephemeral-storage: 100Mi}
             limits: {cpu: "2", memory: 6Gi, ephemeral-storage: 512Mi}
@@ -50,3 +60,4 @@ spec:
       volumes:
         - {name: home, persistentVolumeClaim: {claimName: roborobo-home}}
         - {name: ssh, secret: {secretName: roborobo-ssh, defaultMode: 0440}}
+        - {name: keys, emptyDir: {medium: Memory, sizeLimit: 16Mi}}

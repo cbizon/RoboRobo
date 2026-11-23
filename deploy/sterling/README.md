@@ -50,10 +50,15 @@ launchctl bootout gui/$(id -u)/org.renci.roborobo.sequel
    Then delete the private key files from your Mac, or keep them somewhere
    safe; the cluster has its copy.
 
-5. **Claude**: the agent runs use `CLAUDE_CODE_OAUTH_TOKEN` from the existing
-   `claude-provider-credentials` secret (made for miner2049er from `claude
-   setup-token`). To use a separate token, create another secret the same
-   way and change the name in `deployment.yaml`.
+5. **Claude**: the service and its agent runs use their own token, made with
+   `claude setup-token` while signed in to the account they should draw on,
+   so they don't share miner2049er's allowance (on Nov 23 they did, hit the
+   limit, and ran Sonnet). Paste it at the prompt; it stays out of your
+   shell history:
+
+   ```bash
+   read -rs TOKEN && kubectl create secret generic roborobo-claude -n bizon --from-literal=CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" && unset TOKEN
+   ```
 
 6. **Your commit identity**: set `GIT_EMAIL` in `deployment.yaml`.
 
@@ -66,7 +71,7 @@ docker buildx build --platform linux/amd64 -t ghcr.io/cbizon/roborobo:0.1-$(git 
 Put the tag and digest the push prints into `deployment.yaml`, then:
 
 ```bash
-kubectl apply -n bizon -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml -f deploy/sterling/service.yaml
+kubectl apply -n bizon -f deploy/sterling/rbac.yaml -f deploy/sterling/pvc.yaml -f deploy/sterling/deployment.yaml -f deploy/sterling/service.yaml
 kubectl logs -n bizon -f deploy/roborobo-service
 ```
 
@@ -108,6 +113,19 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 - **Instructions and approvals** work as now: write and push from your Mac.
   The service merges them at its next look and runs the lines they name.
   Pull on your Mac to see what the runs did.
+
+## How runs are kept apart from the keys
+
+Each agent run is a Job of its own (`roborobo-<day>-<line>-...`), from the
+service's image, on the service's node. It mounts only `Projects/` and uv's
+cache from the volume and gets the Claude token; the service's keys are in a
+memory-only folder no run mounts. `program submit`, `jobs` and `fetch` in a
+run are sent to the service (`roborobo-api`), which runs them with its keys
+for the run holding the current token. Watch runs with
+
+```bash
+kubectl get jobs -n bizon -l app.kubernetes.io/component=agent
+```
 
 ## Limits
 

@@ -4,6 +4,27 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (agent runs in their own pods)
+
+- In the service, each agent run is now a Kubernetes Job of its own
+  (`ROBOROBO_RUNNER=kubernetes`, `roborobo.kube`), from the service's
+  image. It mounts only `Projects/` (program clones, data folders,
+  RoboRobo) and uv's cache from the service's volume, with a scratch home,
+  and gets the Claude token and nothing else: no SSH keys, no deploy key,
+  no service-account token. It runs on the service's node, because the
+  volume was made ReadWriteOnce. Before this, runs shared the service's
+  pod and could read its keys, which is how the Nov 23 run could push an
+  approval.
+- `program submit`, `jobs` and `fetch` in an agent pod are sent to the
+  service (`roborobo.service_api`), which runs them with its keys, for the
+  run holding the current token, for a program it serves, and only those
+  three commands. Runs keep their cluster workflow without holding a key.
+- The service's keys live in a memory-only folder (`/run/roborobo`) that no
+  agent pod mounts, as does the SSH connection socket; copies an earlier
+  version kept on the volume are removed at start.
+- The service has its own service account with a Role to create and watch
+  Jobs and read pods and logs.
+
 ## 2026-11-23 (signed approvals, from sequel)
 
 - On Nov 23 an agent run in the service pod approved its own change. The

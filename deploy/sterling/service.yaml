@@ -11,3 +11,15 @@ spec:
   selector: {app.kubernetes.io/part-of: roborobo, app.kubernetes.io/component: service}
   ports:
     - {name: http, port: 80, targetPort: dashboard}
+---
+# Where agent pods send program submit, jobs and fetch (roborobo.service_api).
+# Inside the cluster only; each request needs the token of the run in progress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: roborobo-api
+  labels: {app.kubernetes.io/part-of: roborobo, app.kubernetes.io/component: service}
+spec:
+  selector: {app.kubernetes.io/part-of: roborobo, app.kubernetes.io/component: service}
+  ports:
+    - {name: api, port: 8081, targetPort: api}

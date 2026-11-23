@@ -24,11 +24,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
 
-from roborobo import artifacts, cluster, config, mapview, night, render, service
+from roborobo import artifacts, cluster, config, mapview, night, render, service, service_api
 from roborobo.approvals import approve
 from roborobo.checks import check_program
 from roborobo.config import CONFIG
@@ -168,11 +169,16 @@ def cmd_serve(args) -> int:
     if not args.repo:
         raise SystemExit("give at least one --repo")
     service.serve([r.expanduser() for r in args.repo], state, args.poll_minutes, args.once,
-                  args.dashboard_host, args.dashboard_port)
+                  args.dashboard_host, args.dashboard_port, args.api_port)
     return 0
 
 
 def main(argv=None) -> None:
+    args_in = list(sys.argv[1:] if argv is None else argv)
+    if (os.environ.get("ROBOROBO_SERVICE_URL") and args_in
+            and args_in[0] in service_api.FORWARDED):
+        # An agent pod holds no keys: the service runs this command for it.
+        sys.exit(service_api.forward(args_in))
     ap = argparse.ArgumentParser(prog="program", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="command", required=True)
     new = sub.add_parser("new", help="create a program repository from the template")
@@ -281,6 +287,8 @@ def main(argv=None) -> None:
                     help="where the dashboard listens (0.0.0.0 in a pod)")
     sv.add_argument("--dashboard-port", type=int, default=8080,
                     help="the dashboard's port; 0 for no dashboard")
+    sv.add_argument("--api-port", type=int, default=0,
+                    help="where agent pods send submit/jobs/fetch (0: no agent pods)")
     sv.set_defaults(func=cmd_serve)
     args = ap.parse_args(argv)
     sys.exit(args.func(args))

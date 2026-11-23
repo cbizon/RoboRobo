@@ -374,11 +374,10 @@ Still to do:
 - **Sterling** as a `kubernetes` host.
 - **`program cancel`.**
 - **Credentials.** On the Mac the agent runs as you, so it could call `ssh`
-  or `sbatch` itself; only the brief says not to. In the service as built,
-  runs share the pod and can read its keys (the Hatteras key and the
-  program's deploy key). A GitHub ruleset stops anyone but you pushing
-  `approved/*` tags or rewriting `main`; the real fix is runs in their own
-  pods without the secret mounted.
+  or `sbatch` itself; only the brief says not to. In the service, each run
+  is a pod of its own with no keys (Nov 23): `program submit`, `jobs` and
+  `fetch` are sent to the service, which holds the keys. Approvals are
+  signed with your key, so no one else's push counts as one.
 
 ### Data
 
