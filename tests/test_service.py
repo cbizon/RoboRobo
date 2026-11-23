@@ -284,8 +284,9 @@ def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
     look(served, db)
     page = dashboard_page(served, tmp_path, db)
     assert "<b>L0002 proposed</b> by the agent: Spare heater. One is one sample." in page
-    assert "<b>L0001</b><br>Heater" in page and "<b>L0003</b><br>Fan" in page
-    assert "<b>L0002</b><br>" not in page  # only active lines get a row
+    assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><br>Heater" in page
+    assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><br>Fan" in page
+    assert "lines/L0002.html'><b>" not in page  # only active lines get a row
     assert f"{day}-L0001" in page and "A quiet run." in page and "no claims" in page
     link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", page).group(1))
     query = parse_qs(urlparse(link).query)
@@ -347,3 +348,57 @@ def test_questions_answered_by_a_later_instruction_are_not_shown(served, tmp_pat
     time.sleep(1.1)  # commit times are in whole seconds
     instruct(served, "## L0001 Heater\n\n1. Yes, higher.\n")
     assert "Should the heater go higher?" not in dashboard_page(served, tmp_path, db)
+
+
+def test_each_line_has_a_page_with_its_documents(served, tmp_path):
+    from roborobo import dashboard
+    line_dir = served / "lines" / "L0001"
+    line_dir.mkdir(parents=True)
+    (line_dir / "progress.md").write_text("# Progress\n\n- **Done:** the heater test.\n")
+    (line_dir / "design.md").write_text("# Design\n\n<script>alert(1)</script>\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+    long_state = "The heater drives the drift. " * 12
+    append(served, "lines.jsonl", line("L0001", "update", state=long_state,
+                                       artifacts=[{"kind": "evidence", "path": "evidence/E0001.json"},
+                                                  {"kind": "code branch", "path": "method/heater"}]))
+    now = service.now_utc().isoformat()
+    append(served, "lines.jsonl", line("L0001", "note", at=now, night=now[:10],
+                                       text="Heater results are in."))
+    (served / "evidence").mkdir(exist_ok=True)
+    (served / "evidence" / "E0001.json").write_text('{"drift": 0.4}')
+    commit(served, "a line with documents")
+    db = conn(tmp_path)
+    index = dashboard_page(served, tmp_path, db)
+    assert "<details><summary>" in index and long_state.strip() in index  # folded, not cut
+    assert "(today)" in index.split("lines/L0001.html")[1].split("</tr>")[0]  # last heard
+
+    folder = tmp_path / "state" / "dashboard" / "demo"
+    line_page = (folder / "lines" / "L0001.html").read_text()
+    assert "<h1>L0001 · Heater</h1>" in line_page
+    assert "<strong>Done:</strong> the heater test." in line_page  # progress, rendered
+    assert "href='../docs/lines/L0001/design.md.html'" in line_page
+    assert "href='../docs/evidence/E0001.json.html'" in line_page
+    assert "<code>method/heater</code>" in line_page  # a branch: named, no page
+    design = (folder / "docs" / "lines" / "L0001" / "design.md.html").read_text()
+    assert "<h1>Design</h1>" in design and "<td>1</td>" in design
+    assert "&lt;script&gt;" in design and "<script>alert" not in design
+    evidence = (folder / "docs" / "evidence" / "E0001.json.html").read_text()
+    assert '&quot;drift&quot;: 0.4' in evidence
+    assert "href='../../lines/L0001.html'" in evidence  # back to the line
+
+
+def test_a_quiet_line_is_marked(served, tmp_path):
+    old = "2026-01-02T03:04:05+00:00"
+    append(served, "lines.jsonl", line("L0003", "note", at=old, night="2026-01-02",
+                                       text="A note from long ago."))
+    commit(served, "an old note")
+    page = dashboard_page(served, tmp_path, conn(tmp_path))
+    row = page.split("lines/L0003.html")[1].split("</tr>")[0]
+    assert "class=warn" in row and "days ago" in row
+
+
+def test_lists_right_after_a_paragraph_render_as_lists():
+    from roborobo.dashboard import render_markdown
+    out = render_markdown("The hold step:\n1. Walk the graph.\n2. Advance members.\n\n"
+                          "```\nnot a list:\n1. stays code\n```\n")
+    assert "<ol>" in out and "<li>Walk the graph.</li>" in out
+    assert "<code>not a list:\n1. stays code\n</code>" in out
