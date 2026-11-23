@@ -1,0 +1,4 @@
+# The SSH keys whose signatures make an approval count (ssh allowed-signers
+# format). Changing this file is how approvers are added or removed; the
+# service has no way to push to RoboRobo.
+bizon@renci.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAUWY35uUa0inRBpsF/OHtpVNcMKZfxnAmtZD+IAb47
