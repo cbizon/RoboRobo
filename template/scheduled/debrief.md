@@ -1,15 +1,19 @@
 Prepare the morning debrief for the {{name}} research program, and wait for
 {{scientist}} to discuss it.
 
-Work in {{repo}}. Run `uv run --project {{roborobo}} program check`. Read
-the night's report, `{{data_dir}}/logs/YYYY-MM-DD/night.md` (dated by the
-evening the night started): which lines ran, and anything that went wrong.
-Then read DIRECTION.md, PROGRAM.md, the night's instruction, and for each
-line that ran its summary (`sessions/YYYY-MM-DD-L0013.json`) and the
-checker's review of it (`reviews/YYYY-MM-DD-L0013.json`). If there is no
-report, the night runner didn't run: say so first. Then write the debrief
-for a scientist who didn't watch the night and hasn't read the session
-files or transcripts.
+Work in {{repo}}. First run `git pull`: if the always-on service runs
+this program, its runs are on the remote and not here yet. Then run `uv
+run --project {{roborobo}} program check`. Find what ran since the last
+debrief: the night's report, `{{data_dir}}/logs/YYYY-MM-DD/night.md` (dated
+by the evening the night started), if the night runner ran; otherwise the
+summaries and reviews the service committed since the last debrief (`git
+log --since=yesterday -- sessions reviews`). A line's later runs in a day
+are numbered (`sessions/YYYY-MM-DD-L0013-2.json`). Then read DIRECTION.md,
+PROGRAM.md, the instruction, and for each run its summary
+(`sessions/YYYY-MM-DD-L0013.json`) and the checker's review of it
+(`reviews/YYYY-MM-DD-L0013.json`). If nothing ran, say so first. Then write
+the debrief for a scientist who didn't watch the runs and hasn't read the
+session files or transcripts.
 
 The instruction's "Asked" section is what {{scientist}} asked for, in
 {{scientist}}'s words. The debrief answers those questions as they were
