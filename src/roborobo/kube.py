@@ -9,7 +9,7 @@ else: no SSH keys, no deploy key, no service-account token. It runs on the
 service's node, since the volume can be attached to one node.
 
 Commands that need the service's keys (``program submit``, ``jobs``,
-``fetch``) are sent to the service over HTTP with a token made for this run
+``fetch``, and ``check``, which fetches approval tags) are sent to the service over HTTP with a token made for this run
 (see ``roborobo.service_api``), so a run keeps its cluster workflow without
 ever holding a key. The service pushes what the run committed, as before.
 
@@ -31,8 +31,8 @@ from pathlib import Path
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 POLL_SECONDS = 10
-# A run whose pod doesn't exist by then won't start (a quota, a bad image):
-# fail it, saying so, rather than wait out its time limit.
+# A run whose container hasn't started by then won't (a quota, an image it
+# can't pull): fail it, saying so, rather than wait out its time limit.
 POD_START_SECONDS = 300
 
 
@@ -56,6 +56,7 @@ class Settings:
     git_name: str
     git_email: str
     service_labels: dict[str, str] = field(default_factory=dict)
+    pull_secrets: list[dict] = field(default_factory=list)  # the service pod's, e.g. for ghcr.io
     ca: str | None = None          # the cluster's CA file; None for a plain-HTTP stand-in
 
     def context(self):
@@ -83,6 +84,7 @@ def in_cluster() -> Settings:
     settings.image = me["spec"]["containers"][0]["image"]  # the agent runs the service's image
     settings.service_labels = {k: v for k, v in me["metadata"]["labels"].items()
                                if k.startswith("app.kubernetes.io/")}
+    settings.pull_secrets = me["spec"].get("imagePullSecrets", [])  # the image is private
     return settings
 
 
@@ -130,6 +132,7 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
         "topologyKey": "kubernetes.io/hostname"}]}} if settings.service_labels else None
     pod = {
         "restartPolicy": "Never",
+        "imagePullSecrets": settings.pull_secrets,
         "automountServiceAccountToken": False,
         "securityContext": {"runAsNonRoot": True, "runAsUser": 7474, "runAsGroup": 7474,
                             "fsGroup": 7474, "seccompProfile": {"type": "RuntimeDefault"}},
@@ -157,6 +160,21 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
                      "template": {"metadata": {"labels": labels}, "spec": pod}}}
 
 
+def not_started(pods: list[dict]) -> str | None:
+    """Why a run's container hasn't started, or None if it has."""
+    if not pods:
+        return "no pod was created: a quota?"
+    statuses = pods[0].get("status", {}).get("containerStatuses") or []
+    if any("running" in s.get("state", {}) or "terminated" in s.get("state", {})
+           for s in statuses):
+        return None
+    waiting = next((s["state"]["waiting"] for s in statuses if "waiting" in s.get("state", {})),
+                   None)
+    if waiting:
+        return f"{waiting.get('reason', 'waiting')}: {waiting.get('message', '')[:200]}".strip()
+    return f"pod {pods[0].get('status', {}).get('phase', 'Pending')}"
+
+
 def run(settings: Settings, name: str, command: list[str], workdir: str, minutes: float,
         run_token: str, log: Path, sleep=time.sleep, clock=time.monotonic) -> str | None:
     """Run one agent pod to the end; write its output to ``log``; return what
@@ -171,12 +189,13 @@ def run(settings: Settings, name: str, command: list[str], workdir: str, minutes
             status = request(settings, "GET", f"{jobs}/{name}").get("status", {})
             if status.get("succeeded") or status.get("failed"):
                 break
-            if (clock() - started > POD_START_SECONDS
-                    and not request(settings, "GET", pods_path)["items"]):
-                log.parent.mkdir(parents=True, exist_ok=True)
-                log.write_text("")
-                return (f"its pod wasn't created within {POD_START_SECONDS // 60} minutes "
-                        f"(see `kubectl describe job {name}`: a quota, or the image)")
+            if clock() - started > POD_START_SECONDS:
+                stuck = not_started(request(settings, "GET", pods_path)["items"])
+                if stuck:
+                    log.parent.mkdir(parents=True, exist_ok=True)
+                    log.write_text("")
+                    return (f"its pod didn't start within {POD_START_SECONDS // 60} minutes "
+                            f"({stuck}; see `kubectl describe job {name}`)")
             sleep(POLL_SECONDS)
         pods = request(settings, "GET", pods_path)["items"]
         log.parent.mkdir(parents=True, exist_ok=True)
