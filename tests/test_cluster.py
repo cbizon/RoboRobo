@@ -70,12 +70,10 @@ def git(repo, *args):
 
 
 @pytest.fixture(autouse=True)
-def isolated_git(monkeypatch, tmp_path):
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    (tmp_path / "gitconfig").write_text(
-        "[user]\n\tname = Test Scientist\n\temail = t@example.org\n"
-        "[init]\n\tdefaultBranch = main\n")
+def isolated_git(monkeypatch, tmp_path, signing_key):
+    """No global git config but a fixed identity that signs approvals."""
+    from conftest import isolated_gitconfig
+    isolated_gitconfig(monkeypatch, tmp_path, signing_key)
 
 
 @pytest.fixture

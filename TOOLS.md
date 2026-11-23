@@ -17,7 +17,7 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 | Command | Who runs it | What it does |
 | --- | --- | --- |
 | `program new <dir>` | human | Copy `template/` into a new program repository, link the shared schemas, start git history. |
-| `program approve <path>...` | human only | Record the SHA-256 of `DIRECTION.md`, `budgets.yaml`, or files under `referee/` in `approvals.json`. |
+| `program approve` | human only | Record the SHA-256 of every human-only file git tracks in `approvals.json` and push an `approved/*` tag signed with the scientist's SSH key; `program check` counts it only if the key is in RoboRobo's `approvers`. |
 | `program check` | agent, every session start and end; scheduler | Fail loudly on anything below. |
 | `program digest [--check]` | debrief skill; morning check | Render the latest session summary for a human, or print one line saying whether the scientist is needed. |
 | `program map` | anyone | Write the program map, an HTML page built from the records: lines of investigation against nights, a card per line, a glossary. Default path `<data_dir>/map/index.html`; `--out` and `--nights` change where and how many nights. |
@@ -32,7 +32,8 @@ trusted. This is what to build, in order of need. Python, run with `uv`.
 
 ### What `program check` enforces
 
-1. **Human-only files are unchanged since approval.** Hashes of
+1. **Human-only files are unchanged since a signed approval.** The latest
+   `approved/*` tag must be signed by a key in RoboRobo's `approvers`. Hashes of
    `DIRECTION.md`, `budgets.yaml`, and `referee/**` match `approvals.json`.
    The `.claude/settings.json` deny rules stop the Edit and Write tools, but
    not a shell redirect, so the hash check is what actually holds the line.
