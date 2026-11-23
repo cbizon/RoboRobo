@@ -4,7 +4,8 @@
 # files (the brief, the Claude Code settings) are the same here.
 FROM python:3.12-slim-bookworm
 
-ARG CLAUDE_CODE_VERSION=2.1.110
+# 2.1.280 or newer is needed for Opus 5.5.
+ARG CLAUDE_CODE_VERSION=2.1.326
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git openssh-client rsync ca-certificates nodejs npm \
  && rm -rf /var/lib/apt/lists/* \

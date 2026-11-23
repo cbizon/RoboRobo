@@ -19,7 +19,8 @@ def settings(api="http://127.0.0.1:1"):
                          service_url="http://roborobo-api:8081",
                          claude_secret="claude-provider-credentials", git_name="RoboRobo service",
                          git_email="r@example.org",
-                         service_labels={"app.kubernetes.io/component": "service"})
+                         service_labels={"app.kubernetes.io/component": "service"},
+                         pull_secrets=[{"name": "registry-credentials"}])
 
 
 def test_the_agent_pod_holds_no_keys():
@@ -28,6 +29,7 @@ def test_the_agent_pod_holds_no_keys():
     pod = job["spec"]["template"]["spec"]
     container = pod["containers"][0]
     assert pod["automountServiceAccountToken"] is False
+    assert pod["imagePullSecrets"] == [{"name": "registry-credentials"}]  # the image is private
     assert all("secret" not in v for v in pod["volumes"])  # no ssh keys, no deploy key
     assert [m["mountPath"] for m in container["volumeMounts"]] == [
         "/Users/bizon", "/Users/bizon/Projects", "/Users/bizon/.cache/uv"]
@@ -89,11 +91,16 @@ class StandIn:
                 if path.endswith("/pods"):
                     if stand_in.outcome == "never":
                         return self.reply({"items": []})
+                    if stand_in.outcome == "pull":
+                        return self.reply({"items": [{"metadata": {"name": "pod-1"}, "status": {
+                            "phase": "Pending", "containerStatuses": [{"state": {"waiting": {
+                                "reason": "ImagePullBackOff",
+                                "message": "Back-off pulling image"}}}]}}]})
                     return self.reply({"items": [{"metadata": {"name": "pod-1"}, "status": {
                         "containerStatuses": [{"state": {"terminated": {
                             "exitCode": stand_in.exit_code}}}]}}]})
                 stand_in.gets += 1
-                if stand_in.gets < 2 or stand_in.outcome == "never":
+                if stand_in.gets < 2 or stand_in.outcome in ("never", "pull"):
                     return self.reply({"status": {"active": 1}})
                 if stand_in.outcome == "deadline":
                     return self.reply({"status": {"failed": 1, "conditions": [
@@ -174,7 +181,7 @@ def post(url, body):
 def test_the_service_runs_only_allowed_commands_for_its_programs(program, api, tmp_path):
     service_api.CURRENT.set("run-token")
     code, why = post(api, {"argv": ["approve"], "repo": str(program), "token": "run-token"})
-    assert code == 403 and "only fetch, jobs, submit" in why
+    assert code == 403 and "only check, fetch, jobs, submit" in why
     code, why = post(api, {"argv": ["delete", "A0001", "--reason", "x"], "repo": str(program),
                            "token": "run-token"})
     assert code == 403
@@ -192,7 +199,7 @@ def test_a_pod_that_never_starts_fails_the_run(tmp_path):
     ticks = iter(range(0, 10000, 100))
     problem = kube.run(settings(stand_in.url), "roborobo-x", ["claude"], "/repo", 60, "tok",
                        tmp_path / "worker.log", sleep=lambda s: None, clock=lambda: next(ticks))
-    assert "its pod wasn't created within 5 minutes" in problem
+    assert "its pod didn't start within 5 minutes (no pod was created" in problem
     assert "kubectl describe job roborobo-x" in problem
     assert stand_in.deleted == ["roborobo-x"]
 
@@ -207,3 +214,14 @@ def test_the_agent_pod_fits_the_namespaces_disk_quota():
     job = kube.manifest(settings(), "roborobo-x", ["claude"], "/repo", 60, "tok")
     limits = job["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
     assert limits["ephemeral-storage"] == "1Gi"  # the quota is 4Gi in all, ~2.75Gi in use
+
+
+def test_a_pod_that_cannot_pull_its_image_fails_the_run(tmp_path):
+    """The second try on Nov 23: the pod existed but couldn't pull the private
+    image, and the run would have waited out its hour."""
+    stand_in = StandIn("pull")
+    ticks = iter(range(0, 10000, 100))
+    problem = kube.run(settings(stand_in.url), "roborobo-x", ["claude"], "/repo", 60, "tok",
+                       tmp_path / "worker.log", sleep=lambda s: None, clock=lambda: next(ticks))
+    assert "ImagePullBackOff: Back-off pulling image" in problem
+    assert stand_in.deleted == ["roborobo-x"]

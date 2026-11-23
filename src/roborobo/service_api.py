@@ -1,7 +1,8 @@
 """Cluster commands for agent runs that hold no keys.
 
 An agent pod (see ``roborobo.kube``) has no SSH key, so ``program submit``,
-``program jobs`` and ``program fetch`` can't reach Hatteras from it. With
+``program jobs`` and ``program fetch`` can't reach Hatteras from it, and
+``program check`` can't fetch the approval tags from the program's remote. With
 ``ROBOROBO_SERVICE_URL`` set, those commands send their arguments to the
 service instead, which runs them in the same repository (the pods share it)
 with its keys and returns the output and exit code.
@@ -26,7 +27,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-FORWARDED = {"submit", "jobs", "fetch"}
+# check only reads, but it fetches approval tags from the remote, which an
+# agent pod can't reach.
+FORWARDED = {"submit", "jobs", "fetch", "check"}
 TIMEOUT_SECONDS = 30 * 60
 
 
