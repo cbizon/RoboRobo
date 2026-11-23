@@ -31,6 +31,15 @@ from pathlib import Path
 
 ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 POLL_SECONDS = 10
+# A run whose pod doesn't exist by then won't start (a quota, a bad image):
+# fail it, saying so, rather than wait out its time limit.
+POD_START_SECONDS = 300
+
+
+class APIError(RuntimeError):
+    def __init__(self, message: str, code: int):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -87,8 +96,8 @@ def request(settings: Settings, method: str, path: str, body: dict | None = None
         with urllib.request.urlopen(req, context=settings.context(), timeout=60) as response:
             payload = response.read()
     except urllib.error.HTTPError as error:
-        raise RuntimeError(f"Kubernetes API {method} {path} failed ({error.code}): "
-                           f"{error.read().decode()[:500]}") from None
+        raise APIError(f"Kubernetes API {method} {path} failed ({error.code}): "
+                       f"{error.read().decode()[:500]}", error.code) from None
     return payload.decode() if raw else json.loads(payload or b"{}")
 
 
@@ -131,11 +140,12 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
                 {"name": "scratch", "mountPath": home},
                 {"name": "home", "mountPath": f"{home}/Projects", "subPath": "Projects"},
                 {"name": "home", "mountPath": f"{home}/.cache/uv", "subPath": ".cache/uv"}],
+            # The namespace's quota on ephemeral-storage limits is 4Gi in all.
             "resources": {"requests": {"cpu": "1", "memory": "4Gi", "ephemeral-storage": "100Mi"},
-                          "limits": {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "2Gi"}},
+                          "limits": {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "1Gi"}},
             "securityContext": {"allowPrivilegeEscalation": False,
                                 "capabilities": {"drop": ["ALL"]}}}],
-        "volumes": [{"name": "scratch", "emptyDir": {"sizeLimit": "2Gi"}},
+        "volumes": [{"name": "scratch", "emptyDir": {"sizeLimit": "1Gi"}},
                     {"name": "home", "persistentVolumeClaim": {"claimName": settings.volume}}],
     }
     if affinity:
@@ -148,20 +158,27 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
 
 
 def run(settings: Settings, name: str, command: list[str], workdir: str, minutes: float,
-        run_token: str, log: Path, sleep=time.sleep) -> str | None:
+        run_token: str, log: Path, sleep=time.sleep, clock=time.monotonic) -> str | None:
     """Run one agent pod to the end; write its output to ``log``; return what
     went wrong, if anything (the same messages as a local run)."""
     jobs = f"/apis/batch/v1/namespaces/{settings.namespace}/jobs"
     request(settings, "POST", jobs, manifest(settings, name, command, workdir, minutes,
                                              run_token))
+    pods_path = f"/api/v1/namespaces/{settings.namespace}/pods?labelSelector=job-name%3D{name}"
+    started = clock()
     try:
         while True:
             status = request(settings, "GET", f"{jobs}/{name}").get("status", {})
             if status.get("succeeded") or status.get("failed"):
                 break
+            if (clock() - started > POD_START_SECONDS
+                    and not request(settings, "GET", pods_path)["items"]):
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text("")
+                return (f"its pod wasn't created within {POD_START_SECONDS // 60} minutes "
+                        f"(see `kubectl describe job {name}`: a quota, or the image)")
             sleep(POLL_SECONDS)
-        pods = request(settings, "GET", f"/api/v1/namespaces/{settings.namespace}/pods"
-                                        f"?labelSelector=job-name%3D{name}")["items"]
+        pods = request(settings, "GET", pods_path)["items"]
         log.parent.mkdir(parents=True, exist_ok=True)
         if not pods:
             log.write_text("")
@@ -181,5 +198,9 @@ def run(settings: Settings, name: str, command: list[str], workdir: str, minutes
             return f"exited with code {code} (log: {log})"
         return None
     finally:
-        request(settings, "DELETE", f"{jobs}/{name}",
-                {"kind": "DeleteOptions", "apiVersion": "v1", "propagationPolicy": "Background"})
+        try:
+            request(settings, "DELETE", f"{jobs}/{name}", {
+                "kind": "DeleteOptions", "apiVersion": "v1", "propagationPolicy": "Background"})
+        except APIError as error:
+            if error.code != 404:  # already gone (deleted by hand) is fine; nothing else is
+                raise
