@@ -22,13 +22,10 @@ def git(repo, *args):
 
 
 @pytest.fixture(autouse=True)
-def isolated_git(monkeypatch, tmp_path):
-    """No global git config (signing, hooks), a fixed identity."""
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    (tmp_path / "gitconfig").write_text(
-        "[user]\n\tname = Test Scientist\n\temail = t@example.org\n"
-        "[init]\n\tdefaultBranch = main\n")
+def isolated_git(monkeypatch, tmp_path, signing_key):
+    """No global git config but a fixed identity that signs approvals."""
+    from conftest import isolated_gitconfig
+    isolated_gitconfig(monkeypatch, tmp_path, signing_key)
 
 
 @pytest.fixture
@@ -174,6 +171,55 @@ def test_budgets_with_hosts(program):
 def test_budget_rules_are_checked(program, text, message):
     problems, _ = budget_problems(program, text, HATTERAS)
     assert any(message in p for p in problems), problems
+
+
+def test_an_unsigned_pushed_approval_does_not_count(program, capsys):
+    """What an agent run in the service did on Nov 23: approve, tag and push,
+    with a key GitHub lets through. Without the scientist's signature the
+    tag doesn't count."""
+    run("approve", "--repo", program)
+    with (program / "budgets.yaml").open("a") as f:
+        f.write("# widened by the agent\n")
+    import roborobo.approvals as ap
+    from roborobo import config
+    prog = config.load(program)
+    (program / "approvals.json").write_text(json.dumps({"files": ap.manifest(prog)}))
+    commit(program, "forged")
+    git(program, "tag", "approved/20990101T000000Z")
+    git(program, "push", "-q", "origin", "main", "refs/tags/approved/20990101T000000Z")
+    code, out = check(program, capsys)
+    assert code == 1 and "approval approved/20990101T000000Z isn't signed by an approver" in out
+
+
+def test_an_approval_signed_by_another_key_does_not_count(program, capsys, tmp_path):
+    run("approve", "--repo", program)
+    other = tmp_path / "agents-key"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other)], check=True)
+    git(program, "-c", f"user.signingkey={other}.pub", "tag", "-s", "-m", "forged",
+        "approved/20990101T000000Z")
+    git(program, "push", "-q", "origin", "refs/tags/approved/20990101T000000Z")
+    code, out = check(program, capsys)
+    assert code == 1 and "isn't signed by an approver" in out
+
+
+def test_approve_needs_a_signing_key_that_is_an_approver(program, tmp_path):
+    gitconfig = tmp_path / "gitconfig"
+    text = gitconfig.read_text()
+    gitconfig.write_text(text.replace("[gpg]\n\tformat = ssh\n", ""))
+    assert "approvals are signed with your SSH key" in run("approve", "--repo", program)
+    gitconfig.write_text(text)
+    (tmp_path / "approvers").write_text("someone@example.org ssh-ed25519 AAAAnotyours\n")
+    assert "your signing key isn't in" in run("approve", "--repo", program)
+
+
+def test_ignored_files_are_not_human_files(program, capsys):
+    (program / ".gitignore").write_text("__pycache__/\n")
+    commit(program, "ignore caches")
+    run("approve", "--repo", program)
+    cache = program / "referee" / "tests" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "test_score.cpython-312.pyc").write_bytes(b"compiled")
+    assert check(program, capsys)[0] == 0
 
 
 def test_template_drift_fails_and_sync_fixes(program, capsys):

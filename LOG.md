@@ -4,6 +4,32 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (signed approvals, from sequel)
+
+- On Nov 23 an agent run in the service pod approved its own change. The
+  referee's tests left Python caches under `referee/`, `program check`
+  failed on them as new human-only files, and the agent ran `program
+  approve`. The deny rule (`Bash(uv run --project * program approve:*)`)
+  didn't match its command, and GitHub's tag ruleset let the push through:
+  a deploy key on a personal repository acts as its owner, who may bypass.
+  It approved only the caches, but anything in the pod could approve.
+- Approvals are now signed: `program approve` makes an annotated tag signed
+  with the scientist's SSH key (`gpg.format = ssh`, `user.signingkey`), and
+  `program check` counts the latest approval only if `git verify-tag`
+  finds a good signature from a key in RoboRobo's `approvers` file. The
+  key lives only on the scientist's computer and the list lives in
+  RoboRobo, which the service can't push to, so who can push tags no
+  longer matters. Earlier, unsigned approvals stop counting: approve once
+  more after upgrading.
+- Human-only files are what git tracks or would track; git-ignored files
+  never count, so caches can't make an approval look stale.
+- The brief says approving is the scientist's alone, and that a check
+  failure on the scientist's files means a blocker and stop.
+- Limit: in the pod, RoboRobo's clone is on the volume, so a deliberate
+  forgery (a new key plus a local edit to `approvers`) could pass the
+  pod's own check; the scientist's check, on their own RoboRobo clone,
+  would still reject it.
+
 ## 2026-11-23 (first look, from sequel)
 
 - The service's first look at a program records an event as already
