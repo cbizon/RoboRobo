@@ -9,8 +9,8 @@ with its keys and returns the output and exit code.
 
 The service accepts a command only:
 
-- with the token made for the run in progress (none when nothing runs);
-- for a repository it serves;
+- with the token of a run in progress, for that run's own folder (its line's
+  worktree): a run can't send commands for another line;
 - if it is one of ``FORWARDED``: never ``approve``, ``delete``, or anything
   else that isn't the run's to do.
 """
@@ -29,27 +29,33 @@ from pathlib import Path
 
 # check only reads, but it fetches approval tags from the remote, which an
 # agent pod can't reach.
-FORWARDED = {"submit", "jobs", "fetch", "check"}
+# next-id: ids come from the service, so lines running at once never collide.
+FORWARDED = {"submit", "jobs", "fetch", "check", "next-id"}
 TIMEOUT_SECONDS = 30 * 60
 
 
-class RunToken:
-    """The token of the run in progress, if any."""
+class RunTokens:
+    """The tokens of the runs in progress, each bound to the folder its run
+    works in."""
 
     def __init__(self):
-        self._value: str | None = None
+        self._runs: dict[str, Path] = {}
         self._lock = threading.Lock()
 
-    def set(self, value: str | None) -> None:
+    def add(self, token: str, repo: Path) -> None:
         with self._lock:
-            self._value = value
+            self._runs[token] = Path(repo).expanduser().resolve()
 
-    def matches(self, value: str | None) -> bool:
+    def remove(self, token: str) -> None:
         with self._lock:
-            return bool(self._value) and value == self._value
+            self._runs.pop(token, None)
+
+    def repo(self, token: str | None) -> Path | None:
+        with self._lock:
+            return self._runs.get(token) if token else None
 
 
-CURRENT = RunToken()
+ACTIVE = RunTokens()
 
 
 # --- the client, in an agent pod -----------------------------------------------
@@ -90,8 +96,7 @@ def run_command(argv: list[str], repo: Path) -> tuple[int, str]:
     return done.returncode, done.stdout + done.stderr
 
 
-def handler(repos: list[Path], token: RunToken):
-    served = {Path(r).expanduser().resolve() for r in repos}
+def handler(tokens: RunTokens):
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):  # noqa: A002 (the base class's name)
@@ -110,10 +115,11 @@ def handler(repos: list[Path], token: RunToken):
                 argv, repo = list(body["argv"]), Path(body["repo"]).resolve()
             except (ValueError, KeyError, TypeError):
                 return self.refuse(400, "send {argv, repo, token}")
-            if not token.matches(body.get("token")):
+            own = tokens.repo(body.get("token"))
+            if own is None:
                 return self.refuse(403, "no run with that token is in progress")
-            if repo not in served:
-                return self.refuse(403, f"{repo} isn't a program this service runs")
+            if repo != own:
+                return self.refuse(403, f"{repo} isn't this run's folder ({own})")
             if not argv or argv[0] not in FORWARDED or "--repo" in argv:
                 return self.refuse(403, f"only {', '.join(sorted(FORWARDED))} are run for "
                                         "agent runs")
@@ -127,8 +133,7 @@ def handler(repos: list[Path], token: RunToken):
     return Handler
 
 
-def serve(host: str, port: int, repos: list[Path], token: RunToken = CURRENT
-          ) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), handler(repos, token))
+def serve(host: str, port: int, tokens: RunTokens = ACTIVE) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), handler(tokens))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

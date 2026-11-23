@@ -36,16 +36,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from roborobo import cluster, config, dashboard, service_api
+from roborobo import cluster, config, dashboard, lines, service_api
 from roborobo.config import Program
 from roborobo.gitutil import committed_at, git
 from roborobo.mapview import fold_lines
@@ -82,6 +84,13 @@ CREATE TABLE IF NOT EXISTS paused (
     program TEXT PRIMARY KEY,
     at TEXT NOT NULL,
     reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paused_lines (
+    program TEXT NOT NULL,
+    line TEXT NOT NULL,
+    at TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    PRIMARY KEY (program, line)
 );
 """
 
@@ -240,6 +249,8 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
     """Lines with pending events that may run now, oldest event first, and
     notes on the ones that must wait."""
     active = active_lines(program)
+    held = {r["line"]: r["reason"] for r in conn.execute(
+        "SELECT line, reason FROM paused_lines WHERE program = ?", (program.name,))}
     limits = program.service
     day = today(program, at).isoformat()
     pending = conn.execute("SELECT * FROM events WHERE program = ? AND status = 'pending' "
@@ -253,6 +264,10 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
             conn.execute("UPDATE events SET status = 'dropped' WHERE program = ? AND line = ? "
                          "AND status = 'pending'", (program.name, line))
             waiting.append(f"{line} isn't active; dropped {len(events)} event(s)")
+            continue
+        if line in held:
+            waiting.append(f"{line} is paused: {held[line]} (resume with `program serve "
+                           f"--resume {program.name}:{line}`)")
             continue
         runs_today = conn.execute("SELECT COUNT(*) FROM runs WHERE program = ? AND line = ? "
                                   "AND day = ?", (program.name, line, day)).fetchone()[0]
@@ -272,12 +287,28 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
     return ready, waiting
 
 
-def prompts(program: Program, line: str, stem: str, events: list) -> tuple[str, str, list[str]]:
+def where(program: Program, tree: Program) -> str:
+    """How a prompt names the run's folder: the line's own worktree."""
+    if tree.repo == program.repo:
+        return f"Work in {program.repo}"
+    return (f"Work in {tree.repo}: it is this line's own git worktree of {program.repo}, on "
+            f"branch {lines.branch(tree_line(tree))}. Everything CLAUDE.md and the other "
+            f"files say about {program.repo} applies to this folder instead: read, write and "
+            "commit here, and leave the other folder alone")
+
+
+def tree_line(tree: Program) -> str:
+    return tree.repo.name.rsplit(".", 1)[-1]
+
+
+def prompts(program: Program, line: str, stem: str, events: list,
+            tree: Program | None = None) -> tuple[str, str, list[str]]:
+    tree = tree or program
     reasons = [e["detail"] for e in events]
     instruction = next((e["detail"] for e in reversed(events) if e["kind"] == "instruction"),
                        None)
-    worker = [f"Run line {line} of the {program.name} research program. Work in "
-              f"{program.repo}: read scheduled/line.md and follow it. The always-on service "
+    worker = [f"Run line {line} of the {program.name} research program. {where(program, tree)}. "
+              f"Read scheduled/line.md and follow it. The always-on service "
               f"started this run, so write your summary to sessions/{stem}.json. What started "
               "it: " + "; ".join(reasons) + "."]
     if instruction:
@@ -290,39 +321,84 @@ def prompts(program: Program, line: str, stem: str, events: list) -> tuple[str, 
     followed = instruction or "none: started by the service for " + ", ".join(
         sorted({e["kind"] for e in events}))
     worker.append(f'Set "instruction" in the summary to "{followed}".')
-    checker = (f"Check line {line}'s run of the {program.name} research program. Work in "
-               f"{program.repo}: read scheduled/line-checker.md and follow it for "
+    checker = (f"Check line {line}'s run of the {program.name} research program. "
+               f"{where(program, tree)}. Read scheduled/line-checker.md and follow it for "
                f"sessions/{stem}.json, and write your review to reviews/{stem}.json.")
     return " ".join(worker), checker, reasons
 
 
-def run(conn, program: Program, item: Due, at: datetime) -> tuple[bool, str]:
-    """Run one line for its pending events. Returns whether the program can go
-    on, and a line for the status file."""
+@dataclass
+class Started:
+    item: Due
+    tree: Program
+    run_id: int
+    stem: str
+    day: date
+    worker: str
+    checker: str
+    reasons: list[str]
+
+
+def begin(conn, program: Program, item: Due, at: datetime) -> Started | str:
+    """Bring the line's worktree up to date with main and record the run.
+    Returns the run, or why the line can't start (the line is then paused)."""
+    tree, problem = lines.start(program, item.line)
+    if problem:
+        return problem
     day = today(program, at)
     count = conn.execute("SELECT COUNT(*) FROM runs WHERE program = ? AND line = ? AND day = ?",
                          (program.name, item.line, day.isoformat())).fetchone()[0]
     stem = f"{day.isoformat()}-{item.line}" + (f"-{count + 1}" if count else "")
-    worker, checker, reasons = prompts(program, item.line, stem, item.events)
+    worker, checker, reasons = prompts(program, item.line, stem, item.events, tree)
     cur = conn.execute("INSERT INTO runs (program, line, day, stem, started, reasons) "
                        "VALUES (?, ?, ?, ?, ?, ?)",
                        (program.name, item.line, day.isoformat(), stem, at.isoformat(),
                         json.dumps(reasons)))
-    run_id = cur.lastrowid
     conn.executemany("UPDATE events SET status = 'done', run = ? WHERE id = ?",
-                     [(run_id, e["id"]) for e in item.events])
+                     [(cur.lastrowid, e["id"]) for e in item.events])
     conn.commit()
-    logs = Path(program.data_dir).expanduser() / "logs" / "service" / day.isoformat()
-    result, go_on = run_line(program, day, item.line, reasons, None, logs, stem=stem,
-                             worker_text=worker, checker_text=checker)
+    return Started(item, tree, cur.lastrowid, stem, day, worker, checker, reasons)
+
+
+def work(program: Program, started: Started):
+    """The run itself, in its worktree: the worker, then the checker. Runs in
+    a thread of its own; touches no database."""
+    logs = Path(program.data_dir).expanduser() / "logs" / "service" / started.day.isoformat()
+    return run_line(started.tree, started.day, started.item.line, started.reasons, None, logs,
+                    stem=started.stem, worker_text=started.worker, checker_text=started.checker)
+
+
+def end(conn, program: Program, started: Started, result, go_on: bool) -> list[str]:
+    """Record the run, then merge a clean run into main and push; a run that
+    can't be merged pauses its line. Returns notes."""
     conn.execute("UPDATE runs SET ended = ?, summary = ?, review = ?, problems = ? WHERE id = ?",
                  (now_utc().isoformat(), result.summary, result.review,
-                  json.dumps(result.problems), run_id))
+                  json.dumps(result.problems), started.run_id))
     conn.commit()
-    note = (f"{stem}: {result.minutes:.0f} min, summary {result.summary or 'none'}, "
-            f"review {result.review or 'none'}"
-            + (f"; problems: {'; '.join(result.problems)}" if result.problems else ""))
-    return go_on, note
+    line = started.item.line
+    notes = [f"ran {started.stem}: {result.minutes:.0f} min, summary {result.summary or 'none'}, "
+             f"review {result.review or 'none'}"
+             + (f"; problems: {'; '.join(result.problems)}" if result.problems else "")]
+    if not go_on:
+        pause_line(conn, program, line, f"its run {started.stem} left the line's worktree in a "
+                                        "state the next run can't start from; see its logs")
+        return notes + [f"paused {line}"]
+    problem = lines.finish(program, line)
+    if problem:
+        pause_line(conn, program, line, problem)
+        return notes + [f"paused {line}: {problem}"]
+    return notes
+
+
+def run(conn, program: Program, item: Due, at: datetime) -> tuple[bool, str]:
+    """Run one line on its own (begin, work, end). Returns whether the
+    program can go on, and a note."""
+    started = begin(conn, program, item, at)
+    if isinstance(started, str):
+        pause_line(conn, program, item.line, started)
+        return True, f"paused {item.line}: {started}"
+    result, go_on = work(program, started)
+    return True, "; ".join(end(conn, program, started, result, go_on))
 
 
 def pause(conn, program: Program, reason: str) -> None:
@@ -331,8 +407,20 @@ def pause(conn, program: Program, reason: str) -> None:
     conn.commit()
 
 
+def pause_line(conn, program: Program, line: str, reason: str) -> None:
+    conn.execute("INSERT OR REPLACE INTO paused_lines (program, line, at, reason) "
+                 "VALUES (?, ?, ?, ?)", (program.name, line, now_utc().isoformat(), reason))
+    conn.commit()
+
+
 def resume(conn, name: str) -> bool:
-    cur = conn.execute("DELETE FROM paused WHERE program = ?", (name,))
+    """Resume a program (``sequel``) or one of its lines (``sequel:L0019``)."""
+    program, _, line = name.partition(":")
+    if line:
+        cur = conn.execute("DELETE FROM paused_lines WHERE program = ? AND line = ?",
+                           (program, line))
+    else:
+        cur = conn.execute("DELETE FROM paused WHERE program = ?", (program,))
     conn.commit()
     return cur.rowcount == 1
 
@@ -366,19 +454,26 @@ def look(conn, program: Program, at: datetime | None = None) -> list[str]:
         pause(conn, program, str(error))
         return notes + [f"paused: {error}"]
     notes += [f"waiting: {w}" for w in waiting]
-    for item in ready:
-        go_on, note = run(conn, program, item, now_utc())
-        notes.append(f"ran {note}")
-        if not go_on:
-            pause(conn, program, f"{item.line}'s run left the repository in a state the next "
-                                 "run can't start from; see its logs")
-            notes.append("paused after that run")
-            break
-        reason = sync(program)
-        if reason:
-            pause(conn, program, reason)
-            notes.append(f"paused: {reason}")
-            break
+    batch = []
+    for item in ready[:max(1, int(program.service["max_parallel_lines"]))]:
+        started = begin(conn, program, item, now_utc())
+        if isinstance(started, str):
+            pause_line(conn, program, item.line, started)
+            notes.append(f"paused {item.line}: {started}")
+        else:
+            batch.append(started)
+    # The runs go at once, each in its own worktree; recording, merging into main
+    # and pushing happen here, one run at a time.
+    with ThreadPoolExecutor(max_workers=max(1, len(batch))) as pool:
+        futures = [(started, pool.submit(work, program, started)) for started in batch]
+        for started, future in futures:
+            result, go_on = future.result()
+            notes += end(conn, program, started, result, go_on)
+            reason = sync(program)
+            if reason:
+                pause(conn, program, reason)
+                notes.append(f"paused: {reason}")
+                return notes
     return notes
 
 
@@ -404,8 +499,11 @@ def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = Fals
           api_port: int = 0) -> None:
     state = state.expanduser()
     conn = connect(state / "service.db")
+    # Ledger ids come from here, so lines running at once never take the same one
+    # (records.next_id); forwarded commands inherit it.
+    os.environ["ROBOROBO_IDS"] = str(state / "service.db")
     if api_port:
-        service_api.serve("0.0.0.0", api_port, repos)
+        service_api.serve("0.0.0.0", api_port)
         print(f"agent pods' commands on port {api_port}", flush=True)
     if dashboard_port:
         dashboard.serve_http(state, dashboard_host, dashboard_port)

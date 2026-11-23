@@ -4,6 +4,8 @@ and budgets."""
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from pathlib import Path
@@ -246,10 +248,37 @@ def budgets(program: Program, records: dict[str, list[dict]],
 
 
 def next_id(program: Program, letter: str) -> str:
+    """The next free ledger id. Lines running in parallel (roborobo.lines) each
+    see only their own branch's ledger, so in the service ids come from its
+    database (``ROBOROBO_IDS``): the larger of the highest id in this ledger
+    and the last one handed out, reserved atomically."""
     for filename, (_, id_field, prefix) in LEDGER.items():
         if prefix == letter:
             path = program.repo / "ledger" / filename
             numbers = [int(json.loads(line)[id_field][1:])
                        for line in path.read_text().splitlines() if line.strip()]
-            return f"{letter}{max(numbers, default=0) + 1:04d}"
+            number = max(numbers, default=0) + 1
+            database = os.environ.get("ROBOROBO_IDS")
+            if database:
+                number = reserve(Path(database), program.name, letter, number)
+            return f"{letter}{number:04d}"
     raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B, L, T, A")
+
+
+def reserve(database: Path, program: str, letter: str, at_least: int) -> int:
+    """Hand out the next id number for a program and letter, never one handed
+    out before, and never below ``at_least``."""
+    conn = sqlite3.connect(database, timeout=60, isolation_level=None)
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS ids (program TEXT, letter TEXT, last INTEGER, "
+                     "PRIMARY KEY (program, letter))")
+        conn.execute("BEGIN IMMEDIATE")  # one reservation at a time, across processes
+        row = conn.execute("SELECT last FROM ids WHERE program = ? AND letter = ?",
+                           (program, letter)).fetchone()
+        number = max(at_least, (row[0] + 1) if row else 0)
+        conn.execute("INSERT OR REPLACE INTO ids (program, letter, last) VALUES (?, ?, ?)",
+                     (program, letter, number))
+        conn.execute("COMMIT")
+        return number
+    finally:
+        conn.close()

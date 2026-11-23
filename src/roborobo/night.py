@@ -145,12 +145,12 @@ def run_agent(program: Program, prompt: str, minutes: float, log: Path) -> str |
     log.parent.mkdir(parents=True, exist_ok=True)
     if os.environ.get("ROBOROBO_RUNNER") == "kubernetes":
         token = secrets.token_hex(24)
-        service_api.CURRENT.set(token)
+        service_api.ACTIVE.add(token, program.repo)  # good only for this run's folder
         try:
             return kube.run(kube.in_cluster(), kube.job_name(log.stem), command,
                             str(program.repo), minutes, token, log)
         finally:
-            service_api.CURRENT.set(None)
+            service_api.ACTIVE.remove(token)
             empty_fetched(program)
     try:
         with log.open("w") as out:

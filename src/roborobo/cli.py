@@ -282,7 +282,8 @@ def main(argv=None) -> None:
                     help="where the service keeps its database and status.md")
     sv.add_argument("--poll-minutes", type=float, default=5)
     sv.add_argument("--once", action="store_true", help="look once and stop")
-    sv.add_argument("--resume", metavar="NAME", help="let a paused program run again")
+    sv.add_argument("--resume", metavar="NAME[:LINE]",
+                    help="let a paused program (sequel) or line (sequel:L0019) run again")
     sv.add_argument("--dashboard-host", default="127.0.0.1",
                     help="where the dashboard listens (0.0.0.0 in a pod)")
     sv.add_argument("--dashboard-port", type=int, default=8080,

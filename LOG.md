@@ -4,6 +4,36 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (branch per line)
+
+- In the service each line runs in a git worktree of its own,
+  `~/Projects/experiments/sequel.L0019` on branch `line/L0019`, beside the
+  program's repository so `../research-programs` still resolves and inside
+  the `Projects/` folder agent pods mount. Before a run, main is merged
+  into the line's branch.
+- After a clean run the service merges the line's branch into main, one
+  merge at a time. Ledger files merge with git's built-in union driver (a
+  template-owned `.gitattributes`), so records two lines appended at once
+  are both kept. Any other conflict aborts the merge and pauses only that
+  line; a merged main that fails `program check` is reset to before the
+  merge (it was never pushed) and pauses the line. A broken run pauses its
+  line, not the program.
+- Lines run at once up to `[service] max_parallel_lines` (default 1). Runs
+  go in threads; recording, merging and pushing stay in the service's main
+  thread.
+- The append-only check follows main's first-parent history, so a merge
+  brings a line's records in after main's own.
+- Ledger ids come from the service's database (`ROBOROBO_IDS`, and `program
+  next-id` is forwarded), so lines running at once never take the same id.
+- A worktree renders template files with the main repository's path, so
+  they match; the prompt names the worktree as the place to work.
+- Run tokens are bound to their run's worktree: a run can't send commands
+  for another line's folder.
+- The data-folder check counts data recorded on main and every line's
+  branch, so one line's unmerged data isn't unrecorded to another.
+- `program serve --resume sequel:L0019` resumes a line; the dashboard lists
+  paused lines.
+
 ## 2026-11-23 (first agent runs on Sterling)
 
 - The first agent runs in their own pods stopped within two minutes:
