@@ -28,7 +28,7 @@ spec:
       containers:
         - name: service
           # Build, push and pin the digest: see README.md.
-          image: ghcr.io/cbizon/roborobo:0.3-b2171cc@sha256:f126bc40ada3756f1afd0d409c21027350d2f395ec982cd7d4300cbc0ff0fa4c
+          image: ghcr.io/cbizon/roborobo:0.4-c805a23@sha256:8ffff5e2ef3698fcc163fa71b4babd870b1125553b76e8ba703cdea7054ea939
           env:
             - {name: PROGRAMS, value: "sequel=git@github.com:cbizon/OscillationOverthruster.git"}
             - {name: ROBOROBO_URL, value: "https://github.com/cbizon/RoboRobo.git"}
