@@ -28,7 +28,7 @@ from urllib.parse import quote
 
 from roborobo import cluster, mapview
 from roborobo.config import Program
-from roborobo.gitutil import git
+from roborobo.gitutil import committed_at
 from roborobo.mapview import fold_lines
 from roborobo.records import documents, load_ledger
 
@@ -104,17 +104,11 @@ def run_order(rel: str) -> tuple[str, int]:
     return ("-".join(parts[:3]), number)
 
 
-def committed_at(program: Program, rel: str) -> int:
-    """When a file was last committed (seconds), or 0 if it never was."""
-    out = git(program.repo, "log", "-1", "--format=%ct", "--", rel, check=False).strip()
-    return int(out) if out else 0
-
-
 def answered_after(program: Program) -> int:
     """When the newest instruction file was committed: questions from runs
     committed before it are taken as answered by it."""
     files = sorted((program.repo / "instructions").glob("20*.md"))
-    return committed_at(program, files[-1].relative_to(program.repo).as_posix()) if files else 0
+    return committed_at(program.repo, files[-1].relative_to(program.repo).as_posix()) if files else 0
 
 
 def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]) -> str:
@@ -143,7 +137,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
                               "drop it.</span>"))
     answered = answered_after(program)
     for lid, (rel, doc) in sorted(sessions.items()):
-        if committed_at(program, rel) < answered:
+        if committed_at(program.repo, rel) < answered:
             continue  # asked before the newest instruction, which answers it
         for question in doc.get("questions", []):
             needs.append(("", f"<b>{esc(lid)} asks</b> ({esc(rel)}): "

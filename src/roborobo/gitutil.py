@@ -24,6 +24,12 @@ def history(repo: Path, path: str) -> list[str]:
     return [line for line in out.split() if line]
 
 
+def committed_at(repo: Path, path: str) -> int:
+    """When a path was last committed (Unix seconds), or 0 if it never was."""
+    out = git(repo, "log", "-1", "--format=%ct", "--", path, check=False).strip()
+    return int(out) if out else 0
+
+
 def has_head(repo: Path) -> bool:
     return subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "HEAD"],
                           capture_output=True).returncode == 0

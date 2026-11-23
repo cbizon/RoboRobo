@@ -22,9 +22,10 @@ pushes what runs committed. Nothing is retried quietly: a run that leaves
 the repository dirty or ``program check`` failing, or a merge that
 conflicts, pauses the program until ``program serve --resume <name>``.
 Errors reaching a host or the remote are shown in the status file and
-tried again at the next look. The first look at a program records the
-events already there without running anything, so starting the service
-doesn't rerun what the night runner did.
+tried again at the next look. On the first look at a program, an event the
+line has already run on (it has a summary committed after the event) is
+recorded as seen, and anything else is pending: starting the service
+neither reruns nor skips what the night runner did or didn't do.
 
 State is a small SQLite database (events, runs, paused programs), kept
 outside the program repositories; ``status.md`` beside it says what the
@@ -46,7 +47,7 @@ from zoneinfo import ZoneInfo
 
 from roborobo import cluster, config, dashboard
 from roborobo.config import Program
-from roborobo.gitutil import git
+from roborobo.gitutil import committed_at, git
 from roborobo.mapview import fold_lines
 from roborobo.night import LINE_HEADING, challenged_lines, run_line, uncommitted
 from roborobo.records import load_ledger
@@ -159,7 +160,7 @@ def instruction_events(program: Program, day: date) -> list[tuple[str, str, str]
     return found
 
 
-def job_events(program: Program) -> tuple[list[tuple[str, str, str]], list[str]]:
+def job_events(program: Program) -> tuple[list[tuple[str, str, str, int]], list[str]]:
     """Record ended jobs as a line would (program jobs) and commit what that
     wrote; one event per ended job with a line."""
     if not program.hosts:
@@ -170,7 +171,9 @@ def job_events(program: Program) -> tuple[list[tuple[str, str, str]], list[str]]
         if job.get("line_id"):
             detail = (f"job {job['host']}-{job['job_id']} ({job['experiment_id']}) ended "
                       f"{job['state']}, artifact {job.get('artifact_id')}")
-            found.append((job["line_id"], f"job:{job['host']}-{job['job_id']}", detail))
+            ended = int(datetime.fromisoformat(job["ended_at"].replace("Z", "+00:00"))
+                        .timestamp())
+            found.append((job["line_id"], f"job:{job['host']}-{job['job_id']}", detail, ended))
     if uncommitted(program):
         git(program.repo, "add", "ledger", "evidence")
         ids = ", ".join(f"{j['host']}-{j['job_id']}" for j in report.ended) or "mirror"
@@ -178,21 +181,36 @@ def job_events(program: Program) -> tuple[list[tuple[str, str, str]], list[str]]
     return found, report.problems
 
 
+def last_summary_committed(program: Program, line: str) -> int:
+    """When the line's newest session summary was committed (0 if never)."""
+    return max((committed_at(program.repo, p.relative_to(program.repo).as_posix())
+                for p in (program.repo / "sessions").glob(f"*-{line}*.json")), default=0)
+
+
 def collect(conn, program: Program, day: date) -> list[str]:
-    """Look for new events; on the first look at a program, record them as
-    seen without running anything. Returns notes for the status file."""
+    """Look for new events. On the first look at a program, an event whose
+    line already has a summary committed after it (the night runner, or an
+    earlier service, ran on it) is recorded as seen; anything the line hasn't
+    run on yet is pending, so starting the service neither redoes nor skips
+    work. Returns notes for the status file."""
     first = conn.execute("SELECT COUNT(*) FROM events WHERE program = ?",
                          (program.name,)).fetchone()[0] == 0
-    status = "seen" if first else "pending"
+
+    def status(line: str, since: int) -> str:
+        if first and last_summary_committed(program, line) > since:
+            return "seen"
+        return "pending"
+
     notes = []
     for line, key, detail in instruction_events(program, day):
-        add_event(conn, program, line, "instruction", key, detail, status)
+        add_event(conn, program, line, "instruction", key, detail,
+                  status(line, committed_at(program.repo, detail)))
     for line, review in challenged_lines(program).items():
         add_event(conn, program, line, "challenge", f"challenge:{review}",
-                  f"open challenges in {review}", status)
+                  f"open challenges in {review}", status(line, committed_at(program.repo, review)))
     jobs, problems = job_events(program)
-    for line, key, detail in jobs:
-        add_event(conn, program, line, "job", key, detail, status)
+    for line, key, detail, ended in jobs:
+        add_event(conn, program, line, "job", key, detail, status(line, ended))
     notes += [f"job problem: {p}" for p in problems]
     if first:
         # Mark something so a program with no events yet isn't "first" forever.

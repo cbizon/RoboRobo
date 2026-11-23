@@ -86,12 +86,35 @@ def runs(db):
     return [dict(r) for r in db.execute("SELECT * FROM runs ORDER BY id")]
 
 
-def test_the_first_look_runs_nothing(served, tmp_path):
-    instruct(served, "## L0001 Heater\n\n### Asked\n1. Is it the heater?\n")
+def ran_on(program, lid, day):
+    """A summary for the line, committed a second later: the night runner ran it."""
+    import time
+    time.sleep(1.1)  # commit times are in whole seconds
+    doc = {"date": day, "line_id": lid, "instruction": f"instructions/{day}.md",
+           "headline": "The night runner's run.", "experiments": [], "claims_changed": [],
+           "questions": [], "budget": {}, "open_blockers": [],
+           "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
+    (program / "sessions" / f"{day}-{lid}.json").write_text(json.dumps(doc))
+    commit(program, f"{lid} ran")
+
+
+def test_the_first_look_skips_what_already_ran(served, tmp_path):
+    day = instruct(served, "## L0001 Heater\n\n### Asked\n1. Is it the heater?\n")
+    ran_on(served, "L0001", day)
     db = conn(tmp_path)
     look(served, db)
     assert runs(db) == [] and prompts(tmp_path) == []
     assert db.execute("SELECT status FROM events WHERE kind = 'instruction'").fetchone()[0] == "seen"
+
+
+def test_the_first_look_runs_what_never_ran(served, tmp_path):
+    """The night runner was turned off before it reached tonight's instruction."""
+    day = instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n\n"
+                           "## L0003 Fan\n\n1. Does the fan matter?\n")
+    ran_on(served, "L0001", day)
+    db = conn(tmp_path)
+    look(served, db)
+    assert [r["line"] for r in runs(db)] == ["L0003"]
 
 
 def test_a_new_instruction_runs_its_line_once_and_pushes(served, tmp_path):

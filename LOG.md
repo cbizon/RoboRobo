@@ -4,6 +4,17 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (first look, from sequel)
+
+- The service's first look at a program records an event as already
+  handled only if its line has a summary committed after it (after the
+  instruction file, the review, or the job's end); anything else is
+  pending and runs. It used to record everything as seen, assuming the
+  night runner had done it. Sequel's service started at 8 pm on Nov 22,
+  before the 11 pm night, with the night runner already off, so the
+  Nov 22 instruction's three lines never ran until the events were set
+  back to pending by hand.
+
 ## 2026-11-23 (dashboard and security, from sequel)
 
 - The service writes a dashboard after every look and serves it
