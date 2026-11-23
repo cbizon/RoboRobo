@@ -291,7 +291,9 @@ def test_the_dashboard_is_served(tmp_path):
     server = dashboard.serve_http(tmp_path, "127.0.0.1", 0)
     try:
         port = server.server_address[1]
-        assert urlopen(f"http://127.0.0.1:{port}/").read() == b"<h1>hello</h1>"
+        response = urlopen(f"http://127.0.0.1:{port}/")
+        assert response.read() == b"<h1>hello</h1>"
+        assert response.headers["Cache-Control"] == "no-store"
     finally:
         server.shutdown()
 
@@ -303,3 +305,22 @@ def test_later_runs_sort_after_earlier_ones():
     assert sorted(names, key=run_order) == [
         "sessions/2026-11-22-L0013-3.json", "sessions/2026-11-23-L0013.json",
         "sessions/2026-11-23-L0013-2.json"]
+
+
+def test_questions_answered_by_a_later_instruction_are_not_shown(served, tmp_path):
+    from roborobo import dashboard
+    asked = {"date": "2026-11-17", "line_id": "L0001", "instruction": "none",
+             "headline": "A run with a question.", "experiments": [], "claims_changed": [],
+             "questions": [{"question": "Should the heater go higher?",
+                            "why_it_matters": "It decides the next run.",
+                            "default_if_unanswered": "Keep it where it is."}],
+             "budget": {}, "open_blockers": [],
+             "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
+    (served / "sessions" / "2026-11-17-L0001.json").write_text(json.dumps(asked))
+    commit(served, "a run that asks")
+    db = conn(tmp_path)
+    assert "Should the heater go higher?" in dashboard_page(served, tmp_path, db)
+    import time
+    time.sleep(1.1)  # commit times are in whole seconds
+    instruct(served, "## L0001 Heater\n\n1. Yes, higher.\n")
+    assert "Should the heater go higher?" not in dashboard_page(served, tmp_path, db)

@@ -28,6 +28,7 @@ from urllib.parse import quote
 
 from roborobo import cluster, mapview
 from roborobo.config import Program
+from roborobo.gitutil import git
 from roborobo.mapview import fold_lines
 from roborobo.records import documents, load_ledger
 
@@ -65,12 +66,15 @@ def esc(text) -> str:
     return html.escape(str(text))
 
 
-def discuss_link(program: Program, lid: str, name: str, latest: str | None) -> str:
+def discuss_link(program: Program, lid: str, name: str, latest: str | None,
+                 reviewed: bool = True) -> str:
     """A claude:// link that opens a Code tab session in the scientist's clone
     (the same path as the service's, which mirrors the Mac's layout)."""
     reads = [f"lines/{lid}/progress.md"]
     if latest:
-        reads += [f"sessions/{latest}.json", f"reviews/{latest}.json"]
+        reads.append(f"sessions/{latest}.json")
+        if reviewed:
+            reads.append(f"reviews/{latest}.json")
     prompt = (f"Run `git pull` first. Then let's discuss line {lid} ({name}) of the "
               f"{program.name} research program. Read {', '.join(reads)} and wait for my "
               "questions. If we settle on an instruction, add it under `## " + lid + "` in "
@@ -100,6 +104,19 @@ def run_order(rel: str) -> tuple[str, int]:
     return ("-".join(parts[:3]), number)
 
 
+def committed_at(program: Program, rel: str) -> int:
+    """When a file was last committed (seconds), or 0 if it never was."""
+    out = git(program.repo, "log", "-1", "--format=%ct", "--", rel, check=False).strip()
+    return int(out) if out else 0
+
+
+def answered_after(program: Program) -> int:
+    """When the newest instruction file was committed: questions from runs
+    committed before it are taken as answered by it."""
+    files = sorted((program.repo / "instructions").glob("20*.md"))
+    return committed_at(program, files[-1].relative_to(program.repo).as_posix()) if files else 0
+
+
 def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]) -> str:
     records, _ = load_ledger(program)
     lines = fold_lines(records.get("lines.jsonl", []))
@@ -124,7 +141,10 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
                               f"{esc(line.get('name', ''))}. {esc(line.get('reason', ''))}"
                               "<br><span class=meta>Make it active (a line update by you) or "
                               "drop it.</span>"))
+    answered = answered_after(program)
     for lid, (rel, doc) in sorted(sessions.items()):
+        if committed_at(program, rel) < answered:
+            continue  # asked before the newest instruction, which answers it
         for question in doc.get("questions", []):
             needs.append(("", f"<b>{esc(lid)} asks</b> ({esc(rel)}): "
                               f"{esc(question['question'])}<br><span class=meta>If "
@@ -178,7 +198,8 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         if jobs:
             flight.append(f"{len(jobs)} job(s) on {esc(', '.join(sorted({j['host'] for j in jobs})))}")
         flight += [f"waiting: {esc(e['detail'])}" for e in events]
-        link = discuss_link(program, lid, line.get("name", lid), stem)
+        reviewed = bool(review) and Path(review[0]).stem == stem
+        link = discuss_link(program, lid, line.get("name", lid), stem, reviewed)
         out.append(f"<tr><td><b>{esc(lid)}</b><br>{esc(line.get('name', ''))}</td>"
                    f"<td>{esc(mapview.short(line.get('state', ''), 220))}</td>"
                    f"<td>{run_text}</td><td>{check}</td>"
@@ -218,6 +239,10 @@ class QuietHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):  # noqa: A002 (the base class's name)
         pass
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")  # always the latest look
+        super().end_headers()
 
 
 def serve_http(state: Path, host: str, port: int) -> ThreadingHTTPServer:
