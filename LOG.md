@@ -4,6 +4,17 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (agent pods on Sterling)
+
+- The first agent pod on Sterling was never created: it asked for a 2Gi
+  ephemeral-storage limit, and the namespace allows 4Gi of those in all,
+  with about 2.75Gi in use. It now asks for 1Gi (scratch home 1Gi).
+- A run whose pod doesn't exist after five minutes now fails, saying so and
+  pointing at `kubectl describe job`, instead of waiting out its time
+  limit.
+- Deleting a run's Job that was already deleted by hand is no longer an
+  error.
+
 ## 2026-11-23 (agent runs in their own pods)
 
 - In the service, each agent run is now a Kubernetes Job of its own

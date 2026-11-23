@@ -47,8 +47,9 @@ def test_the_agent_pod_holds_no_keys():
 class StandIn:
     """A stand-in for the few Kubernetes API calls an agent run makes."""
 
-    def __init__(self, outcome="succeeded", exit_code=0, log="the agent's output\n"):
-        self.outcome, self.exit_code, self.log = outcome, exit_code, log
+    def __init__(self, outcome="succeeded", exit_code=0, log="the agent's output\n",
+                 gone=False):
+        self.outcome, self.exit_code, self.log, self.gone = outcome, exit_code, log, gone
         self.created, self.deleted, self.gets = [], [], 0
         self.token_live_at_create = None
         stand_in = self
@@ -73,7 +74,12 @@ class StandIn:
                 self.reply(job)
 
             def do_DELETE(self):  # noqa: N802
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))  # else: a reset
                 stand_in.deleted.append(urlparse(self.path).path.rsplit("/", 1)[1])
+                if stand_in.gone:
+                    self.send_response(404)
+                    self.end_headers()
+                    return self.wfile.write(b'{"reason": "NotFound"}')
                 self.reply({})
 
             def do_GET(self):  # noqa: N802
@@ -81,11 +87,13 @@ class StandIn:
                 if path.endswith("/log"):
                     return self.reply(stand_in.log, raw=True)
                 if path.endswith("/pods"):
+                    if stand_in.outcome == "never":
+                        return self.reply({"items": []})
                     return self.reply({"items": [{"metadata": {"name": "pod-1"}, "status": {
                         "containerStatuses": [{"state": {"terminated": {
                             "exitCode": stand_in.exit_code}}}]}}]})
                 stand_in.gets += 1
-                if stand_in.gets < 2:
+                if stand_in.gets < 2 or stand_in.outcome == "never":
                     return self.reply({"status": {"active": 1}})
                 if stand_in.outcome == "deadline":
                     return self.reply({"status": {"failed": 1, "conditions": [
@@ -175,3 +183,27 @@ def test_the_service_runs_only_allowed_commands_for_its_programs(program, api, t
     service_api.CURRENT.set(None)
     code, why = post(api, {"argv": ["jobs"], "repo": str(program), "token": "run-token"})
     assert code == 403  # nothing is running, so no token works
+
+
+def test_a_pod_that_never_starts_fails_the_run(tmp_path):
+    """On Nov 23 the first agent pod exceeded the namespace's quota and was never
+    created; the run waited for its time limit instead of saying so."""
+    stand_in = StandIn("never")
+    ticks = iter(range(0, 10000, 100))
+    problem = kube.run(settings(stand_in.url), "roborobo-x", ["claude"], "/repo", 60, "tok",
+                       tmp_path / "worker.log", sleep=lambda s: None, clock=lambda: next(ticks))
+    assert "its pod wasn't created within 5 minutes" in problem
+    assert "kubectl describe job roborobo-x" in problem
+    assert stand_in.deleted == ["roborobo-x"]
+
+
+def test_a_job_deleted_by_hand_is_not_an_error(tmp_path):
+    stand_in = StandIn(gone=True)
+    assert kube.run(settings(stand_in.url), "roborobo-x", ["claude"], "/repo", 60, "tok",
+                    tmp_path / "worker.log", sleep=lambda s: None) is None
+
+
+def test_the_agent_pod_fits_the_namespaces_disk_quota():
+    job = kube.manifest(settings(), "roborobo-x", ["claude"], "/repo", 60, "tok")
+    limits = job["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+    assert limits["ephemeral-storage"] == "1Gi"  # the quota is 4Gi in all, ~2.75Gi in use
