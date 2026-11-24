@@ -13,6 +13,24 @@ if it is, it goes here first and reaches the program through `program sync`.
   worktree on Sterling: it read the grapenuts clone and wrote and deleted a
   file in the data folder.
 
+## 2026-11-23 (dashboard: lines and their documents)
+
+- Chris, looking at the dashboard: descriptions were cut off with no way to
+  read them, a line's document had no path and no way to open it, and lines
+  that had been going for a long time said nothing about themselves.
+- Each line has a page: its question, where it stands, its progress notes
+  rendered, jobs in flight, the latest run's answers and questions, the
+  checker's review with the claims judged, recent runs, service runs with
+  problems, and notes.
+- Every document a line keeps (files in `lines/<line>/` and files its
+  records point to) has a page: Markdown rendered (lists after a paragraph
+  line included; raw HTML shown as text, not run), JSON laid out, other
+  text as is. Branches are named without a page.
+- The main table folds long text instead of cutting it, links each line to
+  its page, and has "Last heard": the line's newest summary, note or run,
+  marked when an active line has been quiet for more than three days.
+- New dependency: Python-Markdown.
+
 ## 2026-11-23 (branch per line)
 
 - In the service each line runs in a git worktree of its own,
