@@ -34,12 +34,12 @@ from datetime import datetime, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 from zoneinfo import ZoneInfo
 
 import markdown
 
-from roborobo import cluster, mapview
+from roborobo import actions, cluster, mapview
 from roborobo.config import Program
 from roborobo.gitutil import committed_at
 from roborobo.mapview import fold_lines
@@ -71,6 +71,11 @@ code { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 
 a { color: var(--accent); }
 .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .none { color: var(--muted); }
+form.act { display: inline-block; margin: 6px 8px 0 0; }
+form.act textarea { display: block; width: min(100%, 640px); min-height: 60px; margin-bottom: 4px;
+  font: inherit; }
+form.act button { font: inherit; padding: 3px 12px; border-radius: 6px;
+  border: 1px solid var(--accent); background: var(--surface); color: var(--accent); cursor: pointer; }
 .new { background: var(--accent); color: var(--surface); border-radius: 4px; padding: 0 5px;
   font-size: .75rem; margin-left: 4px; }
 details summary { cursor: pointer; } details[open] summary { color: var(--muted); }
@@ -114,11 +119,44 @@ def mark_seen(key: str, sig: str) -> str:
             + json.dumps(sig) + "); } catch (e) {}</script>")
 
 
+def form(program: Program, action: str, button: str, line: str = "", fields: str = "",
+         **hidden: str) -> str:
+    """A form for one dashboard action, or nothing when the page is read-only
+    (no dashboard token configured). The token is filled in by the page's
+    script from the browser, never written into the page."""
+    if not actions.token():
+        return ""
+    values = {"action": action, "program": program.name, "line": line, "token": "", **hidden}
+    inputs = "".join(f"<input type=hidden name={esc(k)} value='{esc(v)}'>"
+                     for k, v in values.items())
+    return (f"<form class=act method=post action='/action'>{inputs}{fields}"
+            f"<button>{esc(button)}</button></form>")
+
+
+# Fills the token into a form when it is sent. The token is asked for once and
+# kept in this browser; "forget" removes it.
+ACT = """<script>
+document.querySelectorAll("form.act").forEach(function (f) {
+  f.addEventListener("submit", function (e) {
+    var t = null;
+    try { t = localStorage.getItem("roborobo:token"); } catch (x) {}
+    if (!t) {
+      t = prompt("Your dashboard token (kept in this browser):");
+      if (!t) { e.preventDefault(); return; }
+      try { localStorage.setItem("roborobo:token", t.trim()); } catch (x) {}
+    }
+    f.querySelector("[name=token]").value = t.trim();
+  });
+});
+</script>"""
+
+
 def page(title: str, body: str, refresh: bool = False) -> str:
     return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width, initial-scale=1'>"
             + ("<meta http-equiv=refresh content=60>" if refresh else "")
-            + f"<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}</body></html>")
+            + f"<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}"
+            + (ACT if "<form class=act" in body else "") + "</body></html>")
 
 
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
@@ -283,19 +321,23 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         needs.append(("bad", f"<b>Paused</b> since {esc(local(program, paused['at']))}: "
                              f"{esc(paused['reason'])}<br><span class=meta>Fix it in the "
                              f"service's clone, then <code>program serve --resume "
-                             f"{esc(program.name)}</code></span>"))
+                             f"{esc(program.name)}</code></span>"
+                             + form(program, "resume", "Resume")))
     for held in conn.execute("SELECT line, at, reason FROM paused_lines WHERE program = ? "
                              "ORDER BY line", (program.name,)):
         needs.append(("bad", f"<b>{esc(held['line'])} paused</b> since {esc(held['at'][:16])}: "
                              f"{esc(held['reason'])}<br><span class=meta>Fix it in the line's "
                              f"worktree, then <code>program serve --resume "
-                             f"{esc(program.name)}:{esc(held['line'])}</code></span>"))
+                             f"{esc(program.name)}:{esc(held['line'])}</code></span>"
+                             + form(program, "resume", f"Resume {held['line']}", held["line"])))
     for lid, line in sorted(lines.items()):
         if line.get("status") == "proposed":
             needs.append(("", f"<b>{esc(lid)} proposed</b> by the agent: "
                               f"{esc(line.get('name', ''))}. {esc(line.get('reason', ''))}"
                               "<br><span class=meta>Make it active (a line update by you) or "
-                              "drop it.</span>"))
+                              "drop it.</span><br>"
+                              + form(program, "line-status", "Make it active", lid, status="active")
+                              + form(program, "line-status", "Drop it", lid, status="dropped")))
     answered = answered_after(program)
     for lid, (rel, doc) in sorted(sessions.items()):
         if committed_at(program.repo, rel) < answered:
@@ -303,7 +345,11 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         for question in doc.get("questions", []):
             needs.append(("", f"<b>{esc(lid)} asks</b> ({esc(rel)}): "
                               f"{esc(question['question'])}<br><span class=meta>If "
-                              f"unanswered: {esc(question['default_if_unanswered'])}</span>"))
+                              f"unanswered: {esc(question['default_if_unanswered'])}</span>"
+                              + form(program, "instruct", f"Answer {lid}", lid,
+                                     "<textarea name=text required placeholder='Your answer; it "
+                                     "goes into the line&#39;s instruction and starts the line'>"
+                                     "</textarea>", question=question["question"])))
     for lid, (rel, review) in sorted(reviews.items()):
         doubtful = [r for r in review.get("reviews", []) if r["verdict"] in ("doubtful", "broken")]
         if doubtful:
@@ -452,6 +498,11 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
         out += [f"<li>{esc(r['stem'])}: {esc('; '.join(json.loads(r['problems'])))}</li>"
                 for r in failed]
         out.append("</ul>")
+    instruct = form(program, "instruct", f"Instruct {lid}", lid,
+                    "<textarea name=text required placeholder='An instruction for this line; it is "
+                    "added to the line&#39;s instruction file and starts the line'></textarea>")
+    if instruct:
+        out += ["<h3>Instruct this line</h3>", instruct]
     if line.get("notes"):
         out.append("<h3>Notes</h3>")
         out += [f"<div class=card><span class=meta>{esc(n.get('night', n['at'][:10]))}, "
@@ -527,11 +578,38 @@ class QuietHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")  # always the latest look
         super().end_headers()
 
+    def do_POST(self):  # noqa: N802 (the base class's name)
+        """One action from a form on the page (roborobo.actions)."""
+        if self.path != "/action":
+            return self.send_error(404)
+        length = int(self.headers.get("Content-Length", 0))
+        if length > 100_000:
+            return self.send_error(413)
+        sent = parse_qs(self.rfile.read(length).decode(), keep_blank_values=True)
+        fields = {key: values[0] for key, values in sent.items()}
+        try:
+            said, code = actions.perform(self.state, self.repos, fields), 200
+        except actions.Refused as refused:
+            said, code = f"Not done: {refused}", 403
+        forget = ("<p><a href='#' onclick=\"try{localStorage.removeItem('roborobo:token')}"
+                  "catch(e){};this.textContent='Forgotten.';return false\">Forget the token in "
+                  "this browser</a></p>") if code == 403 else ""
+        body = page("RoboRobo service", f"<h1>{esc(said)}</h1><p class=meta>The dashboard shows "
+                    "it after the service's next look.</p><p><a href='/index.html'>← back</a></p>"
+                    + forget).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-def serve_http(state: Path, host: str, port: int) -> ThreadingHTTPServer:
-    """Serve the dashboard folder in a background thread."""
+
+def serve_http(state: Path, host: str, port: int, repos: list[Path] = ()) -> ThreadingHTTPServer:
+    """Serve the dashboard folder in a background thread, and carry out the
+    scientist's actions from it."""
     folder = state / "dashboard"
     folder.mkdir(parents=True, exist_ok=True)
+    QuietHandler.state, QuietHandler.repos = state, list(repos)
     handler = partial(QuietHandler, directory=str(folder))
     server = ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()

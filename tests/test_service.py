@@ -574,3 +574,143 @@ def test_lines_changed_since_their_page_was_opened_are_marked(served, tmp_path):
     commit(served, "news")
     changed = dashboard_page(served, tmp_path, db)
     assert re.search(r"<tr data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", changed).group(1) != row_sig
+
+
+# The dashboard's actions: forms on the page, sent with the scientist's token.
+
+TOKEN = "the-scientists-dashboard-token"
+
+
+@pytest.fixture
+def acting(served, tmp_path, monkeypatch):
+    """The dashboard served with a token; returns a function that posts a form."""
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    from urllib.request import urlopen
+    from roborobo import dashboard
+    monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
+    conn(tmp_path)  # the service's database exists
+    server = dashboard.serve_http(tmp_path / "state", "127.0.0.1", 0, [served])
+    url = f"http://127.0.0.1:{server.server_address[1]}/action"
+
+    def post(token=TOKEN, **fields):
+        data = urlencode({"program": "demo", "token": token, **fields}).encode()
+        try:
+            return 200, urlopen(url, data=data).read().decode()
+        except HTTPError as error:
+            return error.code, error.read().decode()
+
+    yield post
+    server.shutdown()
+
+
+def test_actions_need_the_dashboard_token(served, acting):
+    before = git(served, "rev-parse", "HEAD")
+    code, page = acting(token="a guess", action="line-status", line="L0002", status="active")
+    assert code == 403 and "that isn&#x27;t the dashboard token" in page
+    code, page = acting(token="", action="resume")
+    assert code == 403
+    assert git(served, "rev-parse", "HEAD") == before
+
+
+def test_without_a_token_configured_the_page_is_read_only(served, tmp_path, monkeypatch):
+    monkeypatch.delenv("ROBOROBO_DASHBOARD_TOKEN", raising=False)
+    assert "<form" not in dashboard_page(served, tmp_path, conn(tmp_path))
+    from roborobo import actions
+    with pytest.raises(actions.Refused, match="read-only"):
+        actions.perform(tmp_path / "state", [served], {"token": "x", "action": "resume"})
+
+
+def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
+    page = dashboard_page(served, tmp_path, conn(tmp_path))
+    assert "<button>Make it active</button>" in page and "<button>Drop it</button>" in page
+    assert TOKEN not in page  # the token is never written into the page
+    code, said = acting(action="line-status", line="L0002", status="active")
+    assert code == 200 and "L0002 is made active." in said
+    record = json.loads((served / "ledger" / "lines.jsonl").read_text().splitlines()[-1])
+    assert (record["line_id"], record["status"], record["by"]) == ("L0002", "active", "human")
+    assert "L0002 made active by Pat, from the dashboard" in git(served, "log", "-1", "--format=%s")
+    assert git(served, "rev-parse", "HEAD") == git(served, "rev-parse", "origin/main")  # pushed
+    assert run("check", "--repo", served) == 0
+    code, said = acting(action="line-status", line="L0002", status="dropped")
+    assert code == 403 and "L0002 is active, not proposed" in said
+
+
+def test_answer_a_question_from_the_dashboard_and_the_line_runs(served, tmp_path, acting):
+    db = conn(tmp_path)
+    look(served, db)
+    code, said = acting(action="instruct", line="L0001", text="Yes, go higher.",
+                        question="Should the heater go higher?")
+    assert code == 200 and "Added to lines/L0001/instruction.md" in said
+    text = (served / "lines" / "L0001" / "instruction.md").read_text()
+    assert "> Should the heater go higher?" in text and "Yes, go higher." in text
+    assert "Pat, from the dashboard" in text
+    look(served, db)
+    assert [r["line"] for r in runs(db)] == ["L0001"]  # the instruction started the line
+    code, _ = acting(action="instruct", line="L0001", text="Then try the spare.")
+    assert code == 200
+    text = (served / "lines" / "L0001" / "instruction.md").read_text()
+    assert text.index("Yes, go higher.") < text.index("Then try the spare.")  # newest last
+    code, said = acting(action="instruct", line="L0001", text="   ")
+    assert code == 403 and "nothing was written" in said
+    code, said = acting(action="instruct", line="L9999", text="x")
+    assert code == 403
+
+
+def test_resume_a_paused_line_from_the_dashboard(served, tmp_path, acting):
+    db = conn(tmp_path)
+    service.pause_line(db, config.load(served), "L0001", "a merge conflicted")
+    page = dashboard_page(served, tmp_path, db)
+    assert "<button>Resume L0001</button>" in page
+    code, said = acting(action="resume", line="L0001")
+    assert code == 200 and "demo:L0001 will run again" in said
+    assert db.execute("SELECT COUNT(*) FROM paused_lines").fetchone()[0] == 0
+    code, said = acting(action="resume", line="L0001")
+    assert code == 403 and "isn&#x27;t paused" in said
+
+
+def test_a_line_page_has_an_instruction_box(served, tmp_path, monkeypatch):
+    monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
+    dashboard_page(served, tmp_path, conn(tmp_path))
+    page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
+    assert "<button>Instruct L0001</button>" in page and 'localStorage.getItem("roborobo:token")' in page
+
+
+def test_an_approval_during_a_run_doesnt_pause_the_line(served, tmp_path, monkeypatch):
+    """Nov 23: Chris approved a program.toml change on main while L0020 ran; its
+    worktree didn't have it, the check there failed, and the line was paused."""
+    db = conn(tmp_path)
+    look(served, db)
+    instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
+    real = service.lines.refresh
+    done = []
+
+    def approve_then_refresh(program, line):
+        if not done:  # main moves while the run is under way
+            done.append(1)
+            with (served / "budgets.yaml").open("a") as f:
+                f.write("# a limit Pat changed mid-run\n")
+            commit(served, "a change by Pat")
+            assert run("approve", "--repo", served) == 0
+        return real(program, line)
+
+    monkeypatch.setattr(service.lines, "refresh", approve_then_refresh)
+    notes = look(served, db)
+    (done_run,) = runs(db)
+    assert json.loads(done_run["problems"]) == [] and not any("paused" in n for n in notes)
+    assert (served / "sessions" / f"{done_run['stem']}.json").exists()  # merged into main
+
+
+def test_finished_work_left_on_a_line_branch_is_merged(served, tmp_path):
+    db = conn(tmp_path)
+    look(served, db)
+    prog = config.load(served)
+    tree, _ = service.lines.start(prog, "L0001")
+    (tree.repo / "lines" / "L0001").mkdir(parents=True, exist_ok=True)
+    (tree.repo / "lines" / "L0001" / "progress.md").write_text("Work from a run that never merged.\n")
+    commit(tree.repo, "L0001 work")
+    assert service.lines.unmerged(prog) == ["L0001"]
+    notes = look(served, db)
+    assert "merged L0001's earlier work into main" in notes
+    assert (served / "lines" / "L0001" / "progress.md").exists()
+    assert service.lines.unmerged(prog) == []

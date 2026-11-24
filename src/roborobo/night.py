@@ -209,10 +209,19 @@ def after_run(program: Program, who: str, expected: str) -> tuple[list[str], boo
     return problems, True
 
 
+def checked(program: Program, who: str, expected: str, before_check) -> tuple[list[str], bool]:
+    """after_run, once the service has brought the line's worktree up to date
+    with main (``before_check`` returns a problem, or None)."""
+    problem = before_check() if before_check else None
+    if problem:
+        return [problem], False
+    return after_run(program, who, expected)
+
+
 def run_line(program: Program, night: date, lid: str, reasons: list[str],
              instruction: str | None, logs: Path, stem: str | None = None,
-             worker_text: str | None = None, checker_text: str | None = None
-             ) -> tuple[LineResult, bool]:
+             worker_text: str | None = None, checker_text: str | None = None,
+             before_check=None) -> tuple[LineResult, bool]:
     """A line's worker run, then the checker on what it produced. The night
     runner names files by night (``sessions/<night>-<line>.json``); the
     service passes its own ``stem`` and prompts."""
@@ -226,7 +235,7 @@ def run_line(program: Program, night: date, lid: str, reasons: list[str],
                         float(program.runs["worker_minutes"]), logs / f"{log_name}-worker.log")
     if problem:
         result.problems.append(f"worker {problem}")
-    problems, go_on = after_run(program, "worker", summary)
+    problems, go_on = checked(program, "worker", summary, before_check)
     result.problems += problems
     if (program.repo / summary).exists():
         result.summary = summary
@@ -237,7 +246,7 @@ def run_line(program: Program, night: date, lid: str, reasons: list[str],
                             logs / f"{log_name}-checker.log", role="checker")
         if problem:
             result.problems.append(f"checker {problem}")
-        problems, go_on = after_run(program, "checker", review)
+        problems, go_on = checked(program, "checker", review, before_check)
         result.problems += problems
         if (program.repo / review).exists():
             result.review = review
