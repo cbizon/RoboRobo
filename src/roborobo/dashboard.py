@@ -86,8 +86,14 @@ tr.inactive td { opacity: .75; }
 .state-idle, .state-closed, .state-paused, .state-dropped, .state-proposed { background: var(--muted); }
 a.term { color: inherit; text-decoration: underline dotted; cursor: help; }
 .ahead { margin-top: 6px; font-size: .88rem; }
-form.act button { font: inherit; padding: 3px 12px; border-radius: 6px;
-  border: 1px solid var(--accent); background: var(--surface); color: var(--accent); cursor: pointer; }
+form.act button { font: inherit; font-weight: 600; padding: 5px 14px; border-radius: 6px;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+form.act button:hover { filter: brightness(1.12); }
+form.act button:active { box-shadow: none; transform: translateY(1px); }
+.token-row { display: block; margin: 6px 0; font-size: .9rem; color: var(--warn); }
+.token-row input { font: inherit; width: 22em; max-width: 100%; }
+form.act button:disabled { opacity: .6; cursor: default; }
 .new { background: var(--accent); color: var(--surface); border-radius: 4px; padding: 0 5px;
   font-size: .75rem; margin-left: 4px; }
 details summary { cursor: pointer; } details[open] summary { color: var(--muted); }
@@ -160,16 +166,34 @@ def form(program: Program, action: str, button: str, line: str = "", fields: str
 # Fills the token into a form when it is sent. The token is asked for once and
 # kept in this browser; "forget" removes it.
 ACT = """<script>
+// The token is asked for in the page itself (a browser may silently block a
+// pop-up question, and then the button would do nothing).
 document.querySelectorAll("form.act").forEach(function (f) {
   f.addEventListener("submit", function (e) {
-    var t = null;
+    var t = null, button = f.querySelector("button");
     try { t = localStorage.getItem("roborobo:token"); } catch (x) {}
-    if (!t) {
-      t = prompt("Your dashboard token (kept in this browser):");
-      if (!t) { e.preventDefault(); return; }
-      try { localStorage.setItem("roborobo:token", t.trim()); } catch (x) {}
+    var ask = f.querySelector("input.token-ask");
+    if (ask && ask.value.trim()) {
+      t = ask.value.trim();
+      try { localStorage.setItem("roborobo:token", t); } catch (x) {}
     }
-    f.querySelector("[name=token]").value = t.trim();
+    if (!t) {
+      e.preventDefault();
+      if (!ask) {
+        var row = document.createElement("label");
+        row.className = "token-row";
+        row.textContent = "Your dashboard token, once for this browser: ";
+        ask = document.createElement("input");
+        ask.type = "password"; ask.className = "token-ask"; ask.autocomplete = "off";
+        row.appendChild(ask);
+        f.insertBefore(row, button);
+      }
+      ask.focus();
+      return;
+    }
+    f.querySelector("[name=token]").value = t;
+    button.textContent = "Sending…";
+    setTimeout(function () { button.disabled = true; }, 0);
   });
 });
 </script>"""
@@ -579,7 +603,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
                               f"unanswered: {m(question['default_if_unanswered'])}</span>"
                               + form(program, "instruct", f"Answer {lid}", lid,
                                      "<textarea name=text required placeholder='Your answer; it "
-                                     "goes into the line&#39;s instruction and starts the line'>"
+                                     "goes into the line&#39;s instruction; nothing runs until you press Start'>"
                                      "</textarea>", question=question["question"])))
     for lid, (rel, review) in sorted(reviews.items()):
         doubtful = [r for r in review.get("reviews", []) if r["verdict"] in ("doubtful", "broken")]
@@ -765,7 +789,7 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
         out += ["<h3>Your latest instruction</h3>", f"<p>{told}</p>"]
     instruct = form(program, "instruct", f"Instruct {lid}", lid,
                     "<textarea name=text required placeholder='An instruction for this line; it is "
-                    "added to the line&#39;s instruction file and starts the line'></textarea>")
+                    "added to the line&#39;s instruction file; nothing runs until you press Start'></textarea>")
     if instruct:
         out += ["<h3>Instruct this line</h3>",
                 "<p class=meta>Answers and instructions are saved to the line and start nothing. "

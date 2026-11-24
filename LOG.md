@@ -4,6 +4,15 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-24 (dashboard buttons that did nothing)
+
+- The dashboard asked for its token in a browser pop-up. Some browsers
+  block those without saying so, and then a button did nothing at all. The
+  token is now asked for in a field next to the button, once per browser.
+- Buttons are filled so they read as buttons, and say "Sending…" once pressed.
+- The answer boxes said an answer starts the line; since the Start button
+  it doesn't, and they now say so.
+
 ## 2026-11-24 (PROGRAM.md when lines run together)
 
 - `PROGRAM.md` merges with git's union driver, like the ledger: every line

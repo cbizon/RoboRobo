@@ -688,6 +688,7 @@ def test_a_line_page_has_an_instruction_box(served, tmp_path, monkeypatch):
     dashboard_page(served, tmp_path, conn(tmp_path))
     page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
     assert "<button>Instruct L0001</button>" in page and 'localStorage.getItem("roborobo:token")' in page
+    assert "prompt(" not in page and "token-ask" in page  # asked for in the page, not a pop-up
 
 
 def test_an_approval_during_a_run_doesnt_pause_the_line(served, tmp_path, monkeypatch):
