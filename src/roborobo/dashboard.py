@@ -79,6 +79,11 @@ form.act textarea { display: block; box-sizing: border-box; width: 100%; min-hei
   margin-bottom: 12px; }
 .status { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
 tr.inactive td { opacity: .75; }
+.state { display: inline-block; border-radius: 10px; padding: 1px 9px; font-size: .8rem;
+  font-weight: 600; color: #fff; background: var(--muted); white-space: nowrap; }
+.state-running { background: var(--good); } .state-you { background: var(--warn); }
+.state-stuck { background: var(--bad); } .state-queued, .state-jobs { background: var(--accent); }
+.state-idle, .state-closed, .state-paused, .state-dropped, .state-proposed { background: var(--muted); }
 a.term { color: inherit; text-decoration: underline dotted; cursor: help; }
 .ahead { margin-top: 6px; font-size: .88rem; }
 form.act button { font: inherit; padding: 3px 12px; border-radius: 6px;
@@ -89,7 +94,7 @@ details summary { cursor: pointer; } details[open] summary { color: var(--muted)
 .doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 4px 18px; overflow-x: auto; }
 .doc table { width: auto; } pre { white-space: pre-wrap; word-break: break-word; }
-@media (max-width: 700px) { td:nth-child(4), th:nth-child(4) { display: none; } }
+@media (max-width: 700px) { td:nth-child(5), th:nth-child(5) { display: none; } }
 """
 QUIET_DAYS = 3        # an active line not heard from in longer is marked
 MAX_DOC_BYTES = 2_000_000
@@ -302,10 +307,10 @@ def instruction_status(conn: sqlite3.Connection, program: Program, lid: str,
     key = f"instruction:lines/{lid}/instruction.md:{hashlib.sha256(raw).hexdigest()[:12]}"
     event = conn.execute("SELECT status, run FROM events WHERE program = ? AND key = ?",
                          (program.name, key)).fetchone()
-    if event is None:
-        status = "recorded; the service picks it up within a minute"
+    if event is None or event["status"] == "held":
+        status = "saved, not started: press Start when you've said everything"
     elif event["status"] == "pending":
-        status = "waiting to start (see In flight)"
+        status = "started by you; the run begins within a minute"
     elif event["run"]:
         run = conn.execute("SELECT stem, ended, summary FROM runs WHERE id = ?",
                            (event["run"],)).fetchone()
@@ -320,6 +325,54 @@ def instruction_status(conn: sqlite3.Connection, program: Program, lid: str,
     link = f"<a class=doc href='{esc(base)}docs/lines/{esc(lid)}/instruction.md.html'>"
     return (f"<b>Your instruction</b> <span class=meta>({esc(heading.split(',')[0].strip())})"
             f"</span>: {link}{esc(excerpt)}</a><br><span class=meta>→ {esc(status)}</span>")
+
+
+def line_state(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
+               summary: tuple[str, dict] | None, open_jobs: list[dict],
+               notes: list[str]) -> tuple[str, str, str]:
+    """Where a line is, as one of a few states: (key, label, detail). The key
+    picks the badge's colour."""
+    status = line.get("status", "active")
+    if status != "active":
+        return status, status.capitalize(), ""
+    name = program.name
+    held = conn.execute("SELECT reason FROM paused_lines WHERE program = ? AND line = ?",
+                        (name, lid)).fetchone()
+    if held:
+        return "stuck", "Stopped: needs fixing", held["reason"]
+    running = conn.execute("SELECT stem, started FROM runs WHERE program = ? AND line = ? AND "
+                           "ended IS NULL ORDER BY id DESC", (name, lid)).fetchone()
+    if running:
+        return "running", "Running", f"run {running['stem']} since {local(program, running['started'])}"
+    events = conn.execute("SELECT kind, status FROM events WHERE program = ? AND line = ? AND "
+                          "status IN ('pending', 'held')", (name, lid)).fetchall()
+    if any(e["kind"] == "start" for e in events):
+        return "queued", "Starting", "you pressed Start; the run begins within a minute"
+    path = program.repo / "lines" / lid / "instruction.md"
+    told = committed_at(program.repo, path.relative_to(program.repo).as_posix()) if path.is_file() else 0
+    if any(e["status"] == "held" for e in events):
+        return "you", "Ready when you are", "your instructions are saved; press Start to run them"
+    asked = summary and summary[1].get("questions") and committed_at(program.repo, summary[0]) > max(
+        told, answered_after(program))
+    if asked:
+        count = len(summary[1]["questions"])
+        return "you", f"Asks you {count} question{'s' if count != 1 else ''}", \
+            "answer on the line's page, then press Start"
+    if events:
+        why = next((n.removeprefix("waiting: ") for n in notes
+                    if n.startswith(f"waiting: {lid} ")), "starts at the service's next look")
+        return "queued", "Queued", why
+    if open_jobs:
+        hosts = ", ".join(sorted({j["host"] for j in open_jobs}))
+        return "jobs", f"Waiting on {len(open_jobs)} job{'s' if len(open_jobs) != 1 else ''}", \
+            f"on {hosts}; the line runs again when one ends"
+    return "idle", "Idle", "nothing queued; instruct it or press Start to run it"
+
+
+def badge(state: tuple[str, str, str]) -> str:
+    key, label, detail = state
+    return (f"<span class='state state-{esc(key)}'>{esc(label)}</span>"
+            + (f"<br><span class=meta>{esc(detail)}</span>" if detail else ""))
 
 
 def page(title: str, body: str, refresh: bool = False) -> str:
@@ -433,8 +486,13 @@ def discuss_link(program: Program, lid: str, name: str, latest: str | None,
             reads.append(f"reviews/{latest}.json")
     prompt = (f"Run `git pull` first. Then let's discuss line {lid} ({name}) of the "
               f"{program.name} research program. Read {', '.join(reads)} and wait for my "
-              "questions. If we settle on an instruction, add it under `## " + lid + "` in "
-              "today's file in instructions/ and stop, so I can review and push it.")
+              "questions. If we settle on an instruction, show me its exact text first. When I "
+              f"say yes, append it to lines/{lid}/instruction.md as a new entry at the end, "
+              "under a heading `## <date> <time>, " + program.scientist + ", from a discussion` "
+              "(create the file with a `# Instructions for " + lid + "` title if it doesn't "
+              "exist), commit only that file, and give me the `git push` command to run: you "
+              "can't push from here. Then tell me to press Start on " + lid + " on the dashboard "
+              "when I'm ready; nothing runs until I do.")
     return (f"claude://code/new?folder={quote(str(program.repo))}&q={quote(prompt)}")
 
 
@@ -544,7 +602,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
     if inactive:  # directly before the table: the page's script finds the rows from here
         out.append(f"<label class=meta><input type=checkbox class=show-inactive> Show the "
                    f"{inactive} paused, closed, dropped and proposed lines</label>")
-    out.append("<table><tr><th>Line</th><th>Where it stands</th>"
+    out.append("<table><tr><th>Line</th><th>State</th><th>Where it stands</th>"
                "<th>Last heard</th><th>Last run</th><th>Checker</th><th>In flight</th>"
                "<th></th></tr>")
     for lid, line in sorted(lines.items(), key=lambda item: (item[1].get("status") != "active",
@@ -595,16 +653,21 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         if told:
             stands += f"<div class=ahead>{told}</div>"
         sig = signature(line, session[0] if session else None, review[0] if review else None)
+        state_now = line_state(conn, program, lid, line, session, jobs, notes)
+        can_start = is_active and state_now[0] not in ("running", "stuck") \
+            and state_now[1] != "Starting"
+        start = form(program, "start", "Start", lid) if can_start else ""
         status = "" if is_active else f"<br><span class=status>{esc(line.get('status', ''))}</span>"
         out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'"
                    + ("" if is_active else " class=inactive hidden") + ">"
                    f"<td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
                    f"</b></a><span class=new hidden>new</span><br>{esc(line.get('name', ''))}"
                    f"{status}</td>"
+                   f"<td>{badge(state_now)}</td>"
                    f"<td>{stands}</td><td>{heard_text}</td>"
                    f"<td>{run_text}</td><td>{check}</td>"
                    f"<td>{'<br>'.join(flight) or '<span class=none>nothing</span>'}</td>"
-                   f"<td><a href='{esc(link)}'>Discuss</a></td></tr>")
+                   f"<td><a href='{esc(link)}'>Discuss</a>{start}</td></tr>")
     out.append("</table>")
     out.append(MARK_NEW)
     return "\n".join(out)
@@ -623,12 +686,14 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
                  if not j.get("ended_at") and j.get("line_id") == lid]
     heard = last_heard(program, lid, line, summaries, runs)
     latest = summaries[-1] if summaries else None
+    state_now = line_state(conn, program, lid, line, latest, open_jobs, notes)
     stem = Path(latest[0]).stem if latest else None
     review = next((r for r in reversed(reviews) if Path(r[0]).stem == stem), None)
     sig = signature(line, latest[0] if latest else None, reviews[-1][0] if reviews else None)
     out = [mark_seen(f"{program.name}/{lid}", sig),
            f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
            f"<h1>{esc(lid)} · {esc(line.get('name', ''))}</h1>",
+           f"<p>{badge(state_now)}</p>",
            f"<p class=meta>{esc(line.get('status', ''))} · last heard "
            f"{esc(when(heard, program.timezone)) if heard else 'never'} · <a href='"
            f"{esc(discuss_link(program, lid, line.get('name', lid), stem, bool(review)))}'>"
@@ -702,7 +767,11 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
                     "<textarea name=text required placeholder='An instruction for this line; it is "
                     "added to the line&#39;s instruction file and starts the line'></textarea>")
     if instruct:
-        out += ["<h3>Instruct this line</h3>", instruct]
+        out += ["<h3>Instruct this line</h3>",
+                "<p class=meta>Answers and instructions are saved to the line and start nothing. "
+                "When you've said everything, press Start: the line runs next.</p>", instruct]
+        if line.get("status", "active") == "active" and state_now[0] not in ("running", "stuck"):
+            out.append(form(program, "start", f"Start {lid}", lid))
     now_is = line.get("status", "active")
     why = "<textarea name=comment required placeholder='Why? Saved as your note on the line'></textarea>"
     changes = {"active": [("closed", f"Close {lid}", why), ("paused", f"Pause {lid}", why)],

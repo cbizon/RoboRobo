@@ -105,9 +105,13 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 
   then open <http://localhost:8080/>. It refreshes every minute.
 
-- **Acting from the dashboard:** approve or drop a line the agent proposed,
-  answer a line's question or instruct a line (added to
-  `lines/<line>/instruction.md`, which starts the line), and resume a pause.
+- **Acting from the dashboard:** approve or drop a line the agent proposed;
+  answer a line's questions or instruct it (saved to
+  `lines/<line>/instruction.md`; nothing starts yet); press **Start** when
+  you've said everything, and the line runs next whatever its limits; close,
+  pause or reopen a line with a comment; resume a stopped line. A badge on
+  each line says where it is: running, asks you, ready when you are,
+  queued, waiting on jobs, stopped, idle.
   The page asks once for your dashboard token and keeps it in your browser.
   Make the token once, and read it back when a browser asks:
 
