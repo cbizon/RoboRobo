@@ -72,8 +72,11 @@ a { color: var(--accent); }
 .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .none { color: var(--muted); }
 form.act { display: inline-block; margin: 6px 8px 0 0; }
-form.act textarea { display: block; width: min(100%, 640px); min-height: 60px; margin-bottom: 4px;
-  font: inherit; }
+form.act.wide { display: block; margin-right: 0; }
+form.act textarea { display: block; box-sizing: border-box; width: 100%; min-height: 80px;
+  margin-bottom: 4px; font: inherit; }
+a.term { color: inherit; text-decoration: underline dotted; cursor: help; }
+.ahead { margin-top: 6px; font-size: .88rem; }
 form.act button { font: inherit; padding: 3px 12px; border-radius: 6px;
   border: 1px solid var(--accent); background: var(--surface); color: var(--accent); cursor: pointer; }
 .new { background: var(--accent); color: var(--surface); border-radius: 4px; padding: 0 5px;
@@ -129,7 +132,8 @@ def form(program: Program, action: str, button: str, line: str = "", fields: str
     values = {"action": action, "program": program.name, "line": line, "token": "", **hidden}
     inputs = "".join(f"<input type=hidden name={esc(k)} value='{esc(v)}'>"
                      for k, v in values.items())
-    return (f"<form class=act method=post action='/action'>{inputs}{fields}"
+    kind = "act wide" if fields else "act"
+    return (f"<form class='{kind}' method=post action='/action'>{inputs}{fields}"
             f"<button>{esc(button)}</button></form>")
 
 
@@ -151,12 +155,112 @@ document.querySelectorAll("form.act").forEach(function (f) {
 </script>"""
 
 
+class Marks:
+    """Turns record text into HTML that links what it mentions: a term (or an
+    alias) to its definition, shown on hover; a line's id or name to the
+    line's page; a document's path or file name to its page."""
+
+    def __init__(self, program: Program, lines: dict[str, dict], terms: list[dict],
+                 base: str):
+        self.base = base
+        # lowercased text -> kind, href, title, and the exact spelling if only that counts
+        self.targets: dict[str, tuple[str, str, str, str | None]] = {}
+
+        def add(text: str, kind: str, href: str, title: str = "", exact: bool = False) -> None:
+            self.targets.setdefault(text.lower(), (kind, href, title, text if exact else None))
+
+        for lid, line in lines.items():
+            add(lid, "line", f"lines/{lid}.html", line.get("name", ""))
+            for rel, _ in line_documents(program, lid, line):
+                if is_repo_file(program, rel):
+                    add(rel, "doc", f"docs/{rel}.html")
+                    add(Path(rel).name, "doc", f"docs/{rel}.html", rel)
+        for term in terms:
+            for name in [term["term"], *term.get("aliases", [])]:
+                add(name, "term", f"terms.html#{term['term_id']}", term["definition"])
+        for lid, line in lines.items():  # a line's name, unless a term has it
+            name = line.get("name", "")
+            if len(name) >= 6:  # as written only: "Heater" the line, not every heater
+                add(name, "line", f"lines/{lid}.html", f"line {lid}", exact=True)
+        names = sorted(self.targets, key=len, reverse=True)
+        self.pattern = re.compile(
+            r"(?<![\w/.-])(" + "|".join(re.escape(n) for n in names) + r")(?![\w/-]|\.\w)",
+            re.IGNORECASE) if names else None
+
+    def __call__(self, text) -> str:
+        text = str(text or "")
+        if not self.pattern:
+            return esc(text)
+        out, at = [], 0
+        for found in self.pattern.finditer(text):
+            kind, href, title, exact = self.targets[found[1].lower()]
+            if exact and found[1] != exact:
+                continue
+            out.append(esc(text[at:found.start()]))
+            out.append(f"<a class={kind} href='{esc(self.base + href)}'"
+                       + (f" title='{esc(title)}'" if title else "") + f">{esc(found[1])}</a>")
+            at = found.end()
+        out.append(esc(text[at:]))
+        return "".join(out)
+
+
+def program_terms(records: dict) -> list[dict]:
+    """The program's terms, the latest definition of each, by name."""
+    latest: dict[str, dict] = {}
+    for record in records.get("terms.jsonl", []):
+        latest[record["term_id"]] = record
+    return sorted(latest.values(), key=lambda t: t["term"].lower())
+
+
+def terms_page(program: Program, terms: list[dict], m: Marks) -> str:
+    out = ["<p class=meta><a href='../index.html'>← all lines</a></p>",
+           f"<h1>Terms used in {esc(program.name)}</h1>",
+           "<p class=meta>The names the records use, as the program defines them "
+           "(ledger/terms.jsonl). On every page, a dotted underline marks a term; hover for its "
+           "definition.</p>"]
+    for term in terms:
+        also = (f" <span class=meta>also: {esc(', '.join(term['aliases']))}</span>"
+                if term.get("aliases") else "")
+        out.append(f"<div class=card id='{esc(term['term_id'])}'><b>{esc(term['term'])}</b>{also}"
+                   f"<br>{esc(term['definition'])}</div>")
+    if not terms:
+        out.append("<p class=none>None defined yet.</p>")
+    return page(f"Terms · {program.name}", "\n".join(out))
+
+
+def related(lines: dict[str, dict], lid: str, base: str) -> str:
+    """Links to the lines this one came from, branches into and feeds."""
+    def link(other: str) -> str:
+        name = lines.get(other, {}).get("name", "")
+        return f"<a class=line href='{esc(base)}lines/{esc(other)}.html'>{esc(other)} {esc(name)}</a>"
+    line = lines[lid]
+    parts = []
+    if line.get("parent"):
+        parts.append("from " + link(line["parent"]))
+    branches = [o for o, l in lines.items() if l.get("parent") == lid]
+    if branches:
+        parts.append("branches: " + ", ".join(link(o) for o in branches))
+    if line.get("feeds"):
+        parts.append("feeds " + ", ".join(link(o) for o in line["feeds"]))
+    fed_by = [o for o, l in lines.items() if lid in l.get("feeds", [])]
+    if fed_by:
+        parts.append("fed by " + ", ".join(link(o) for o in fed_by))
+    return "; ".join(parts)
+
+
+def ahead(line: dict, m: Marks) -> str:
+    """What the line does next and what would close it, or that nobody said."""
+    missing = "<span class=none>not recorded</span>"
+    return (f"<b>Next:</b> {m(line['next']) if line.get('next') else missing}<br>"
+            f"<b>Closes when:</b> {m(line['closes_when']) if line.get('closes_when') else missing}")
+
+
 def page(title: str, body: str, refresh: bool = False) -> str:
     return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width, initial-scale=1'>"
             + ("<meta http-equiv=refresh content=60>" if refresh else "")
             + f"<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}"
-            + (ACT if "<form class=act" in body else "") + "</body></html>")
+            + (ACT if "<form class='act" in body else "") + "</body></html>")
 
 
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
@@ -308,6 +412,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
     lines = fold_lines(records.get("lines.jsonl", []))
     all_sessions, _ = line_documents_by_kind(program)
     sessions, reviews = latest_documents(program)
+    m = Marks(program, lines, program_terms(records), f"{program.name}/")
     open_jobs = [j for j in cluster.load_jobs(program) if not j.get("ended_at")]
     paused = conn.execute("SELECT at, reason FROM paused WHERE program = ?",
                           (program.name,)).fetchone()
@@ -319,21 +424,21 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
     needs = []
     if paused:
         needs.append(("bad", f"<b>Paused</b> since {esc(local(program, paused['at']))}: "
-                             f"{esc(paused['reason'])}<br><span class=meta>Fix it in the "
+                             f"{m(paused['reason'])}<br><span class=meta>Fix it in the "
                              f"service's clone, then <code>program serve --resume "
                              f"{esc(program.name)}</code></span>"
                              + form(program, "resume", "Resume")))
     for held in conn.execute("SELECT line, at, reason FROM paused_lines WHERE program = ? "
                              "ORDER BY line", (program.name,)):
-        needs.append(("bad", f"<b>{esc(held['line'])} paused</b> since {esc(held['at'][:16])}: "
-                             f"{esc(held['reason'])}<br><span class=meta>Fix it in the line's "
+        needs.append(("bad", f"<b>{m(held['line'])} paused</b> since {esc(local(program, held['at']))}: "
+                             f"{m(held['reason'])}<br><span class=meta>Fix it in the line's "
                              f"worktree, then <code>program serve --resume "
                              f"{esc(program.name)}:{esc(held['line'])}</code></span>"
                              + form(program, "resume", f"Resume {held['line']}", held["line"])))
     for lid, line in sorted(lines.items()):
         if line.get("status") == "proposed":
-            needs.append(("", f"<b>{esc(lid)} proposed</b> by the agent: "
-                              f"{esc(line.get('name', ''))}. {esc(line.get('reason', ''))}"
+            needs.append(("", f"<b>{m(lid)} proposed</b> by the agent: "
+                              f"{esc(line.get('name', ''))}. {m(line.get('reason', ''))}"
                               "<br><span class=meta>Make it active (a line update by you) or "
                               "drop it.</span><br>"
                               + form(program, "line-status", "Make it active", lid, status="active")
@@ -343,9 +448,10 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         if committed_at(program.repo, rel) < answered:
             continue  # asked before the newest instruction, which answers it
         for question in doc.get("questions", []):
-            needs.append(("", f"<b>{esc(lid)} asks</b> ({esc(rel)}): "
-                              f"{esc(question['question'])}<br><span class=meta>If "
-                              f"unanswered: {esc(question['default_if_unanswered'])}</span>"
+            needs.append(("", f"<b>{m(lid)} asks</b> <span class=meta>({esc(Path(rel).stem)})"
+                              f"</span>: {m(question['question'])}<br><span class=meta>Why it "
+                              f"matters: {m(question['why_it_matters'])}<br>If "
+                              f"unanswered: {m(question['default_if_unanswered'])}</span>"
                               + form(program, "instruct", f"Answer {lid}", lid,
                                      "<textarea name=text required placeholder='Your answer; it "
                                      "goes into the line&#39;s instruction and starts the line'>"
@@ -353,16 +459,17 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
     for lid, (rel, review) in sorted(reviews.items()):
         doubtful = [r for r in review.get("reviews", []) if r["verdict"] in ("doubtful", "broken")]
         if doubtful:
-            needs.append(("bad", f"<b>{esc(lid)}: the checker doubts "
-                                 f"{len(doubtful)} claim(s)</b> ({esc(rel)}): "
-                                 + "; ".join(esc(r["plain_claim"]) for r in doubtful)))
+            needs.append(("bad", f"<b>{m(lid)}: the checker doubts "
+                                 f"{len(doubtful)} claim(s)</b> <span class=meta>("
+                                 f"{esc(Path(rel).stem)})</span>: "
+                                 + "; ".join(m(r["plain_claim"]) for r in doubtful)))
     for note in notes:
         if note.startswith(("job problem:", "waiting:", "error")):
-            needs.append(("bad" if note.startswith(("job", "error")) else "", esc(note)))
+            needs.append(("bad" if note.startswith(("job", "error")) else "", m(note)))
 
     out = [f"<h2>{esc(program.name)}</h2>",
            f"<p class=meta>{esc(program.title)} · <a href='{esc(program.name)}/map.html'>"
-           "program map</a></p>", "<h3>Needs you</h3>", "<div class=needs>"]
+           f"program map</a> · <a href='{esc(program.name)}/terms.html'>terms</a></p>", "<h3>Needs you</h3>", "<div class=needs>"]
     out += [f"<div class='card {kind}'>{text}</div>" for kind, text in needs] or [
         "<div class=card style='border-left-color:var(--good)'>Nothing.</div>"]
     out.append("</div><h3>Lines</h3><table><tr><th>Line</th><th>Where it stands</th>"
@@ -386,7 +493,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         else:
             run_text = "<span class=none>none yet</span>"
         if session:
-            run_text += f"<br>{esc(session[1].get('headline', ''))}"
+            run_text += f"<br>{m(session[1].get('headline', ''))}"
         if review:
             verdicts = [r["verdict"] for r in review[1].get("reviews", [])]
             counts = {v: verdicts.count(v) for v in ("holds", "doubtful", "broken")}
@@ -407,8 +514,11 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         heard_text = (f"<span class={'warn' if quiet else 'meta'}>{esc(when(heard, program.timezone))}</span>"
                       if heard else "<span class=none>never</span>")
         state = line.get("state", "")
-        stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{esc(state)}"
-                  "</details>" if len(state) > 160 else esc(state))
+        stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{m(state)}"
+                  "</details>" if len(state) > 160 else m(state))
+        links = related(lines, lid, f"{program.name}/")
+        stands += (f"<div class=ahead>{ahead(line, m)}"
+                   + (f"<br><span class=meta>{links}</span>" if links else "") + "</div>")
         sig = signature(line, session[0] if session else None, review[0] if review else None)
         out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'>"
                    f"<td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
@@ -424,8 +534,11 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
 
 def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
               summaries: list[tuple[str, dict]], reviews: list[tuple[str, dict]],
-              notes: list[str]) -> str:
+              notes: list[str], lines: dict[str, dict] | None = None,
+              m: Marks | None = None) -> str:
     """Everything about one line on one page."""
+    lines = lines or {lid: line}
+    m = m or Marks(program, lines, [], "../")
     runs = conn.execute("SELECT * FROM runs WHERE program = ? AND line = ? ORDER BY id DESC",
                         (program.name, lid)).fetchall()
     open_jobs = [j for j in cluster.load_jobs(program)
@@ -445,8 +558,11 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     if line.get("question"):
         source = f" <span class=meta>({esc(line['question_source'])})</span>" \
             if line.get("question_source") else ""
-        out += ["<h3>Question</h3>", f"<p>{esc(line['question'])}{source}</p>"]
-    out += ["<h3>Where it stands</h3>", f"<p>{esc(line.get('state', '')) or '<span class=none>not recorded</span>'}</p>"]
+        out += ["<h3>Question</h3>", f"<p>{m(line['question'])}{source}</p>"]
+    links = related(lines, lid, "../")
+    out += ["<h3>Where it stands</h3>",
+            f"<p>{m(line.get('state', '')) or '<span class=none>not recorded</span>'}</p>",
+            f"<p>{ahead(line, m)}</p>"] + ([f"<p class=meta>Related: {links}</p>"] if links else [])
     progress = program.repo / "lines" / lid / "progress.md"
     if progress.is_file():
         out += ["<h3>Progress notes</h3>", f"<div class=doc>{render_file(progress)}</div>"]
@@ -456,24 +572,27 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
             f"{esc(j.get('state', ''))} {esc(j.get('elapsed', ''))}</li>" for j in open_jobs] + ["</ul>"]
     if latest:
         rel, doc = latest
-        out += [f"<h3>Latest run</h3><p><b>{esc(doc.get('headline', ''))}</b> "
+        out += [f"<h3>Latest run</h3><p><b>{m(doc.get('headline', ''))}</b> "
                 f"<span class=meta>({esc(rel)})</span></p>"]
         for answer in doc.get("answers", []):
-            out.append(f"<div class=card><b>Asked:</b> {esc(answer['asked'])}<br>"
-                       f"<b>{esc(answer['status'])}:</b> {esc(answer['answer'])}</div>")
+            out.append(f"<div class=card><b>Asked:</b> {m(answer['asked'])}<br>"
+                       f"<b>{esc(answer['status'])}:</b> {m(answer['answer'])}</div>")
         for question in doc.get("questions", []):
-            out.append(f"<div class=card><b>Question:</b> {esc(question['question'])}<br>"
-                       f"<span class=meta>Why it matters: {esc(question['why_it_matters'])}. "
-                       f"If unanswered: {esc(question['default_if_unanswered'])}</span></div>")
+            out.append(f"<div class=card><b>Question:</b> {m(question['question'])}<br>"
+                       f"<span class=meta>Why it matters: {m(question['why_it_matters'])}. "
+                       f"If unanswered: {m(question['default_if_unanswered'])}</span>"
+                       + form(program, "instruct", f"Answer {lid}", lid,
+                              "<textarea name=text required placeholder='Your answer'></textarea>",
+                              question=question["question"]) + "</div>")
     if review:
         rel, doc = review
-        out += [f"<h3>The checker</h3><p>{esc(doc.get('summary', ''))} "
+        out += [f"<h3>The checker</h3><p>{m(doc.get('summary', ''))} "
                 f"<span class=meta>({esc(rel)})</span></p>"]
         for item in doc.get("reviews", []):
             kind = "good" if item["verdict"] == "holds" else "bad"
             out.append(f"<div class=card><span class={kind}><b>{esc(item['verdict'])}</b></span>: "
-                       f"{esc(item.get('plain_claim', ''))}<br><span class=meta>"
-                       f"{esc(item.get('what_would_resolve', ''))}</span></div>")
+                       f"{m(item.get('plain_claim', ''))}<br><span class=meta>"
+                       f"{m(item.get('what_would_resolve', ''))}</span></div>")
     docs = line_documents(program, lid, line)
     out.append("<h3>Documents</h3>")
     if docs:
@@ -488,7 +607,7 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     else:
         out.append("<p class=none>None yet.</p>")
     out.append("<h3>Recent runs</h3><table><tr><th>Run</th><th>Headline</th></tr>")
-    out += [f"<tr><td>{esc(Path(rel).stem)}</td><td>{esc(doc.get('headline', ''))}</td></tr>"
+    out += [f"<tr><td>{esc(Path(rel).stem)}</td><td>{m(doc.get('headline', ''))}</td></tr>"
             for rel, doc in reversed(summaries[-10:])] or [
         "<tr><td colspan=2 class=none>none yet</td></tr>"]
     out.append("</table>")
@@ -506,7 +625,7 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     if line.get("notes"):
         out.append("<h3>Notes</h3>")
         out += [f"<div class=card><span class=meta>{esc(n.get('night', n['at'][:10]))}, "
-                f"{esc(n['by'])}</span><br>{esc(n.get('text', ''))}</div>"
+                f"{esc(n['by'])}</span><br>{m(n.get('text', ''))}</div>"
                 for n in reversed(line["notes"][-8:])]
     return page(f"{lid} · {line.get('name', '')}", "\n".join(out))
 
@@ -527,11 +646,15 @@ def write_program_pages(folder: Path, conn: sqlite3.Connection, program: Program
     sessions, reviews = line_documents_by_kind(program)
     base = folder / program.name
     used: dict[str, list[str]] = {}
+    terms = program_terms(records)
+    m = Marks(program, lines, terms, "../")
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "terms.html").write_text(terms_page(program, terms, m))
     for lid, line in lines.items():
         target = base / "lines" / f"{lid}.html"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(line_page(conn, program, lid, line, sessions.get(lid, []),
-                                    reviews.get(lid, []), notes))
+                                    reviews.get(lid, []), notes, lines, m))
         for rel, _ in line_documents(program, lid, line):
             if is_repo_file(program, rel):
                 used.setdefault(rel, []).append(lid)

@@ -341,7 +341,8 @@ def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
     day = instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     look(served, db)
     page = dashboard_page(served, tmp_path, db)
-    assert "<b>L0002 proposed</b> by the agent: Spare heater. One is one sample." in page
+    assert ("<b><a class=line href='demo/lines/L0002.html' title='Spare heater'>L0002</a> "
+            "proposed</b> by the agent: Spare heater. One is one sample.") in page
     assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><span class=new hidden>new</span><br>Heater" in page
     assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><span class=new hidden>new</span><br>Fan" in page
     assert "lines/L0002.html'><b>" not in page  # only active lines get a row
@@ -361,7 +362,7 @@ def test_the_dashboard_shows_a_pause_with_how_to_resume(served, tmp_path, monkey
     instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     look(served, db)
     page = dashboard_page(served, tmp_path, db, ["job problem: E0001 job 7 ended FAILED"])
-    assert "<b>L0001 paused</b>" in page and "program serve --resume demo:L0001" in page
+    assert "title='Heater'>L0001</a> paused</b>" in page and "program serve --resume demo:L0001" in page
     assert "job problem: E0001 job 7 ended FAILED" in page
 
 
@@ -427,6 +428,7 @@ def test_each_line_has_a_page_with_its_documents(served, tmp_path):
     db = conn(tmp_path)
     index = dashboard_page(served, tmp_path, db)
     assert "<details><summary>" in index and long_state.strip() in index  # folded, not cut
+    assert "<b>Next:</b> <span class=none>not recorded</span>" in index
     assert "(today)" in index.split("lines/L0001.html")[1].split("</tr>")[0]  # last heard
 
     folder = tmp_path / "state" / "dashboard" / "demo"
@@ -742,3 +744,53 @@ def test_finished_work_left_on_a_line_branch_is_merged(served, tmp_path):
     assert "merged L0001's earlier work into main" in notes
     assert (served / "lines" / "L0001" / "progress.md").exists()
     assert service.lines.unmerged(prog) == []
+
+
+def test_terms_lines_and_documents_are_linked_where_they_are_mentioned(served, tmp_path):
+    """Chris, reading the dashboard: "what's an impulse step method?", "L0009
+    should be a link", "if clusterlifter.md is mentioned on the first page,
+    link it on the first page"."""
+    (served / "lines" / "L0001").mkdir(parents=True)
+    (served / "lines" / "L0001" / "design.md").write_text("# Design\n")
+    append(served, "terms.jsonl", {"term_id": "T0001", "at": "2026-11-05T23:00:00+00:00",
+                                   "by": "agent", "term": "Impulse step",
+                                   "definition": "Advancing held spheres by small pushes each step.",
+                                   "aliases": ["impulse-step method"]})
+    append(served, "lines.jsonl", line(
+        "L0001", "update",
+        state="The impulse-step method is described in design.md; its loops are in L0003.",
+        next="Wait for the Fan line's loops, then compare.",
+        closes_when="The drift is explained with the heater off, or ruled out."))
+    append(served, "lines.jsonl", line("L0003", "update", parent="L0001"))
+    commit(served, "terms and links")
+    index = dashboard_page(served, tmp_path, conn(tmp_path))
+    assert ("<a class=term href='demo/terms.html#T0001' title='Advancing held spheres by small "
+            "pushes each step.'>impulse-step method</a>") in index
+    assert "<a class=doc href='demo/docs/lines/L0001/design.md.html' title='lines/L0001/design.md'>design.md</a>" in index
+    assert "<a class=line href='demo/lines/L0003.html' title='Fan'>L0003</a>" in index
+    assert "<b>Next:</b> Wait for the Fan line" in index
+    assert "<b>Closes when:</b> The drift is explained" in index
+    assert "branches: <a class=line href='demo/lines/L0003.html'>L0003 Fan</a>" in index
+    assert "href='demo/terms.html'>terms</a>" in index
+    folder = tmp_path / "state" / "dashboard" / "demo"
+    terms = (folder / "terms.html").read_text()
+    assert "id='T0001'><b>Impulse step</b>" in terms and "also: impulse-step method" in terms
+    line_page = (folder / "lines" / "L0001.html").read_text()
+    assert "href='../terms.html#T0001'" in line_page and "<b>Closes when:</b>" in line_page
+    fan = (folder / "lines" / "L0003.html").read_text()
+    assert "from <a class=line href='../lines/L0001.html'>L0001 Heater</a>" in fan
+
+
+def test_a_lines_name_links_only_as_written(served, tmp_path):
+    append(served, "lines.jsonl", line("L0003", "update",
+                                       state="The heater was off; see Heater for the rest."))
+    commit(served, "a mention")
+    index = dashboard_page(served, tmp_path, conn(tmp_path))
+    assert "The heater was off; see <a class=line href='demo/lines/L0001.html'" in index
+
+
+def test_answer_boxes_are_full_width(served, tmp_path, monkeypatch):
+    monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
+    dashboard_page(served, tmp_path, conn(tmp_path))
+    page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
+    assert "<form class='act wide'" in page and "form.act.wide { display: block" in page
