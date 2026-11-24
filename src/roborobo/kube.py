@@ -112,12 +112,22 @@ def job_name(stem: str) -> str:
 # Claude Code ignores a project's .claude/settings.json (its allow list and
 # extra directories) until the folder is trusted, and an agent pod starts with
 # an empty home, so the pod trusts the program's folder before starting the
-# agent. That folder's settings are RoboRobo's rendering, which program check
-# keeps unchanged.
-TRUST = ('python3 -c "import json, os, sys; '
-         'open(os.path.expanduser(\'~/.claude.json\'), \'w\').write(json.dumps('
-         '{\'projects\': {sys.argv[1]: {\'hasTrustDialogAccepted\': True}}}))" "$PWD" '
-         '&& exec "$@"')
+# agent (and, for a line's worktree, its main repository). That folder's
+# settings are RoboRobo's rendering, which program check keeps unchanged.
+TRUST = """python3 - <<'TRUST'
+import json, os, subprocess
+# For a git worktree (a line's, roborobo.lines) Claude Code looks trust up under
+# the main repository's path, so trust both the folder and its main repository.
+folders = {os.getcwd()}
+common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                        capture_output=True, text=True)
+if common.returncode == 0:
+    folders.add(os.path.dirname(common.stdout.strip().rstrip("/")))
+with open(os.path.expanduser("~/.claude.json"), "w") as out:
+    json.dump({"projects": {f: {"hasTrustDialogAccepted": True} for f in folders}}, out)
+TRUST
+exec "$@"
+"""
 
 
 def manifest(settings: Settings, name: str, command: list[str], workdir: str,
