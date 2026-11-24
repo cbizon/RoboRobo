@@ -474,7 +474,8 @@ def finish(program: Program, h: Host, job: dict, report: Report,
     (program.repo / record).write_text(text)
     save(program, job)
     report.ended.append(job)
-    if report_failure and job["state"] != SUCCEEDED:
+    asked = job["state"] == "CANCELLED" and job.get("cancel_requested")
+    if report_failure and job["state"] != SUCCEEDED and not asked:
         report.problems.append(f"{job['experiment_id']} job {job['job_id']} on {h.name} ended "
                                f"{job['state']} (exit {job.get('exit_code')}); log in "
                                f"{job['mirror']}")
@@ -518,6 +519,21 @@ def refresh(program: Program) -> Report:
             job["ended_at"] = stamp(now())
             finish(program, h, job, report)
     return report
+
+
+def cancel(program: Program, ref: str, reason: str) -> dict:
+    """Cancel a job in flight (``scancel``). The next ``program jobs`` records
+    it as ended; a job cancelled on request isn't reported as a problem."""
+    job_id = ref.rsplit("-", 1)[-1]
+    found = [j for j in load_jobs(program) if j["job_id"] == job_id and not j.get("ended_at")
+             and ref in (job_id, f"{j['host']}-{job_id}")]
+    if not found:
+        raise SystemExit(f"{ref} isn't a job in flight; `program jobs` lists them")
+    job = found[0]
+    remote(host(program, job["host"]), f"scancel {shlex.quote(job_id)}")
+    job["cancel_requested"] = {"at": stamp(now()), "reason": reason}
+    save(program, job)
+    return job
 
 
 def describe(report: Report) -> str:

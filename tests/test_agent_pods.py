@@ -185,7 +185,7 @@ def post(url, body):
 def test_the_service_runs_only_allowed_commands_for_its_programs(program, api, tmp_path):
     service_api.ACTIVE.add("run-token", program)
     code, why = post(api, {"argv": ["approve"], "repo": str(program), "token": "run-token"})
-    assert code == 403 and "only check, fetch, jobs, next-id, submit" in why
+    assert code == 403 and "are run for agent runs" in why and "approve" not in why
     code, why = post(api, {"argv": ["delete", "A0001", "--reason", "x"], "repo": str(program),
                            "token": "run-token"})
     assert code == 403

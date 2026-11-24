@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://renci.org/research-programs/schemas/artifact.schema.json",
   "title": "Artifact record (ledger/artifacts.jsonl)",
-  "description": "A data folder: what runs produced, where it lives, where it came from, and when it was destroyed. `created` starts an artifact; `updated` records a new manifest after its files changed; `deleted` ends it. Each manifest (ledger/manifests/<id>-<n>.tsv) lists every file as sha256, bytes and path relative to the artifact's folder.",
+  "description": "A data folder: what runs produced, where it lives, where it came from, and when it was destroyed. `created` starts an artifact; `updated` records a new manifest after its files changed; `moved` records its new host and path after its files were copied there and verified against the manifest; `deleted` ends it. Each manifest (ledger/manifests/<id>-<n>.tsv) lists every file as sha256, bytes and path relative to the artifact's folder.",
   "type": "object",
   "required": ["record", "artifact_id", "at", "by"],
   "properties": {
-    "record": {"enum": ["created", "updated", "deleted"]},
+    "record": {"enum": ["created", "updated", "moved", "deleted"]},
     "artifact_id": {"$ref": "_common.schema.json#/$defs/id", "description": "A0001, A0002, ..."},
     "at": {"$ref": "_common.schema.json#/$defs/timestamp"},
     "by": {"$ref": "_common.schema.json#/$defs/actor"},
@@ -53,6 +53,8 @@
      "then": {"required": ["host", "path", "provenance", "files", "bytes", "manifest", "manifest_sha256"]}},
     {"if": {"properties": {"record": {"const": "updated"}}},
      "then": {"required": ["files", "bytes", "manifest", "manifest_sha256"]}},
+    {"if": {"properties": {"record": {"const": "moved"}}},
+     "then": {"required": ["host", "path"]}},
     {"if": {"properties": {"record": {"const": "deleted"}}},
      "then": {"required": ["reason"]}}
   ],

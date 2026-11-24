@@ -1,7 +1,7 @@
 # Tooling
 
 Status (Nov 2026): `program new`, `sync`, `approve`, `check`, `map`,
-`next-id`, `run-night`, `submit`, `jobs`, `record`, `delete`, `fetch`, `serve` and `wake` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7, 8 and 9 are
+`next-id`, `run-night`, `submit`, `jobs`, `record`, `delete`, `fetch`, `serve`, `wake`, `cancel` and `move` are built (`src/roborobo/`). Of the checks below, 1, 2, 6, 7, 8 and 9 are
 enforced; 3 is enforced as "an outcome follows its registration in the
 ledger" (not yet by git timestamps of evidence files); 4 and 5 are not yet.
 `program digest` and the `/program` skill aren't built; the debrief prompt

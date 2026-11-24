@@ -15,6 +15,8 @@
     program record PATH [--experiment E] [--line L] [--input REF ...] [--note TEXT]
                                      record a data folder here (or its new manifest)
     program delete A0123 --reason TEXT   delete a data folder, here or on a cluster
+    program cancel JOB --reason TEXT   cancel a job in flight on a cluster
+    program move A0123 --host H        move a data folder here to a cluster, verified
     program fetch A0123[:PATH] [--max-mb N]   copy cluster data into tmp/fetch/ to look at
     program wake --line L --in-minutes N | --at TIME --reason TEXT
                                      under the service: start a line again later
@@ -155,6 +157,19 @@ def cmd_delete(args) -> int:
     return 0
 
 
+def cmd_cancel(args) -> int:
+    job = cluster.cancel(config.load(args.repo), args.job, args.reason)
+    print(f"asked {job['host']} to cancel job {job['job_id']} ({job['experiment_id']}); "
+          "`program jobs` records it once it has ended")
+    return 0
+
+
+def cmd_move(args) -> int:
+    where = artifacts.move(config.load(args.repo), args.artifact, args.host, args.by)
+    print(f"moved {args.artifact} to {where}, verified file by file; commit the ledger")
+    return 0
+
+
 def cmd_fetch(args) -> int:
     print(artifacts.fetch(config.load(args.repo), args.ref, args.max_mb))
     return 0
@@ -287,6 +302,18 @@ def main(argv=None) -> None:
     dl.add_argument("--repo", type=Path, default=Path.cwd())
     dl.add_argument("--by", **actor)
     dl.set_defaults(func=cmd_delete)
+    cn = sub.add_parser("cancel", help="cancel a job in flight on a cluster")
+    cn.add_argument("job", help="a job id from `program jobs`, e.g. 164647 or hatteras-164647")
+    cn.add_argument("--reason", required=True)
+    cn.add_argument("--repo", type=Path, default=Path.cwd())
+    cn.set_defaults(func=cmd_cancel)
+    mv = sub.add_parser("move", help="move a data folder from this machine to a cluster: "
+                        "copy, verify every file, record, then delete here")
+    mv.add_argument("artifact")
+    mv.add_argument("--host", required=True)
+    mv.add_argument("--repo", type=Path, default=Path.cwd())
+    mv.add_argument("--by", **actor)
+    mv.set_defaults(func=cmd_move)
     ft = sub.add_parser("fetch", help="copy a cluster artifact, or part of it, into "
                         "tmp/fetch/ to look at; emptied after each run")
     ft.add_argument("ref", metavar="A0123[:PATH]")
