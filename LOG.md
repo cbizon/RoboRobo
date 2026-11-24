@@ -4,6 +4,15 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (trust in a line's worktree)
+
+- L0020's first run in its own worktree couldn't use its tools: the pod
+  trusted its folder (`sequel.L0020`), but for a git worktree Claude Code
+  looks trust up under the main repository's path (`sequel`). The pod now
+  trusts both. Checked with a one-off pod in the real `sequel.L0020`
+  worktree on Sterling: it read the grapenuts clone and wrote and deleted a
+  file in the data folder.
+
 ## 2026-11-23 (branch per line)
 
 - In the service each line runs in a git worktree of its own,

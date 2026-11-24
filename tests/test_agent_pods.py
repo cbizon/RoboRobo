@@ -2,6 +2,7 @@
 stand-in Kubernetes API, and forwarding cluster commands to the service."""
 
 import json
+from pathlib import Path
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -232,16 +233,23 @@ def test_a_pod_that_cannot_pull_its_image_fails_the_run(tmp_path):
 
 def test_the_pod_trusts_the_program_folder_then_runs_the_agent(tmp_path, monkeypatch):
     """Claude Code ignores a project's settings until the folder is trusted, and
-    the pod's home starts empty (the first runs on Sterling, Nov 23)."""
+    the pod's home starts empty (the first runs on Sterling, Nov 23). For a
+    line's worktree it looks trust up under the main repository's path."""
     import subprocess
     job = kube.manifest(settings(), "x", ["printf", "%s|", "an argument with spaces", "two"],
                         "/repo", 1, "t")
     command = job["spec"]["template"]["spec"]["containers"][0]["command"]
-    folder = tmp_path / "sequel"
-    folder.mkdir()
-    done = subprocess.run(command, cwd=folder, env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
-                          capture_output=True, text=True, check=True)
+    repo, tree = tmp_path / "sequel", tmp_path / "sequel.L0001"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin:/usr/local/bin",
+           "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1"}
+    (tmp_path / "gitconfig").write_text("[user]\n\tname = T\n\temail = t@example.org\n")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "start"],
+                   check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "line/L0001",
+                    str(tree)], check=True, env=env)
+    done = subprocess.run(command, cwd=tree, env=env, capture_output=True, text=True, check=True)
     assert done.stdout == "an argument with spaces|two|"
-    trusted = json.loads((tmp_path / ".claude.json").read_text())
-    assert trusted == {"projects": {str(folder.resolve()): {"hasTrustDialogAccepted": True}}} or \
-        trusted == {"projects": {str(folder): {"hasTrustDialogAccepted": True}}}
+    trusted = json.loads((tmp_path / ".claude.json").read_text())["projects"]
+    assert {Path(p).resolve() for p in trusted} == {tree.resolve(), repo.resolve()}
+    assert all(v == {"hasTrustDialogAccepted": True} for v in trusted.values())
