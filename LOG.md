@@ -4,6 +4,27 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-24 (Start, and a state for every line)
+
+- Chris: answering on the dashboard started a run at once, while a Discuss
+  thread left a file to push that ran later; and with several questions it
+  may take him hours to answer them all. Now nothing the scientist writes
+  starts a run. Answers and instructions, from the dashboard or a Discuss
+  thread, collect in `lines/<line>/instruction.md` (held events), and a
+  Start button says the line is ready: it runs next, whatever its daily
+  limit or gap, with everything said since its last run.
+- While a line has unstarted instructions, its automatic runs (a job
+  ending, a timer, a challenge) wait too, so a run doesn't start on half of
+  what the scientist meant to say. Start with no new instruction runs the
+  line from its progress notes.
+- The Discuss thread appends to the same instruction file and commits it;
+  the scientist pushes (agents can't push from the program's folder) and
+  presses Start. Dated instruction files still start their lines when
+  pushed, for writing to several lines at once.
+- Every line has a state badge: Running, Asks you N questions, Ready when
+  you are, Starting, Queued (with why), Waiting on N jobs, Stopped: needs
+  fixing, Idle, or its status if it isn't active.
+
 ## 2026-11-23 (dashboard: feedback, closing lines, all lines)
 
 - Chris instructed a line from the dashboard and saw nothing change. Now

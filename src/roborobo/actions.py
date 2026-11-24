@@ -11,8 +11,10 @@ repository lock, then pushed:
 - ``line-status``: make a line the agent proposed ``active`` or drop it;
   pause, close or reopen a line, with a comment kept as a note saying why;
 - ``instruct``: add to a line's own instruction
-  (``lines/<line>/instruction.md``), which starts the line; answering one of
-  a run's questions is an instruction that quotes the question;
+  (``lines/<line>/instruction.md``); answering one of a run's questions is an
+  instruction that quotes the question. Nothing starts yet;
+- ``start``: the scientist has said everything; the line runs next, whatever
+  its daily limit or gap. Until then the line's automatic runs wait too;
 - ``resume``: let a paused program or line run again.
 
 Records these write are marked ``by: human``. That is as strong as the
@@ -149,8 +151,28 @@ def instruct(program: Program, lid: str, text: str, question: str = "") -> str:
     rel = path.relative_to(program.repo).as_posix()
     what = "answered a question of" if question.strip() else "instructed"
     commit(program, [rel], f"{program.scientist} {what} {lid}, from the dashboard")
-    return (f"Your instruction for {lid} is recorded. The line starts within a minute, unless "
-            "it is waiting on a limit; its row shows where it is.")
+    return (f"Saved for {lid}. Nothing starts yet: add more if you like, then press Start "
+            f"on {lid} when it's ready to go.")
+
+
+def start(state: Path, program: Program, lid: str) -> str:
+    """Start: everything the scientist wants to say to the line is said."""
+    from roborobo import service
+    line = line_of(program, lid)
+    if line.get("status", "active") != "active":
+        raise Refused(f"{lid} is {line.get('status')}; make it active first")
+    conn = service.connect(state / "service.db")
+    try:
+        # Pick up an instruction pushed since the last look, so Start covers it.
+        for line_id, key, detail in service.line_instruction_events(program):
+            if line_id == lid:
+                service.add_event(conn, program, lid, "instruction", key, detail, "held")
+        released = service.start_line(conn, program, lid)
+    finally:
+        conn.close()
+    what = (f"with your {released} new instruction{'s' if released != 1 else ''}" if released
+            else "from its progress notes (no new instruction)")
+    return f"{lid} starts within a minute, {what}."
 
 
 def resume(state: Path, program: Program, lid: str = "") -> str:
@@ -185,6 +207,8 @@ def perform(state: Path, repos: list[Path], form: dict[str, str]) -> str:
                             form.get("question", ""))
         elif action == "resume":
             said = resume(state, program, form.get("line", ""))
+        elif action == "start":
+            said = start(state, program, form.get("line", ""))
         else:
             raise Refused(f"{action!r} isn't something this page can do")
     WAKE.set()

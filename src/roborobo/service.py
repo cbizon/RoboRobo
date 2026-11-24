@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS events (
     key TEXT NOT NULL,
     detail TEXT NOT NULL,
     at TEXT NOT NULL,
-    status TEXT NOT NULL,        -- pending, done, seen (recorded at the first look)
+    status TEXT NOT NULL,        -- pending, done, seen (recorded at the first look),
+                                 -- held (the scientist's instruction, until Start)
     run INTEGER,
     UNIQUE (program, key)
 );
@@ -225,6 +226,21 @@ def timer_events(conn, program: Program, at: datetime) -> list[tuple[str, str, s
     return found
 
 
+def start_line(conn, program: Program, line: str) -> int:
+    """The scientist's Start: the line's held instructions are ready, and the
+    line runs next whatever its limits. Returns how many instructions it
+    releases."""
+    released = conn.execute("UPDATE events SET status = 'pending' WHERE program = ? AND line = ? "
+                            "AND status = 'held'", (program.name, line)).rowcount
+    stamp = now_utc().isoformat()
+    conn.execute("INSERT INTO events (program, line, kind, key, detail, at, status) "
+                 "VALUES (?, ?, 'start', ?, ?, ?, 'pending')",
+                 (program.name, line, f"start:{line}:{stamp}",
+                  f"{program.scientist} pressed Start", stamp))
+    conn.commit()
+    return released
+
+
 def set_timer(database: Path, program: Program, line: str, due: datetime, reason: str) -> None:
     """Record a wake-up for a line (program wake). At most three waiting per
     line, between ten minutes and seven days ahead."""
@@ -283,10 +299,15 @@ def collect(conn, program: Program, day: date) -> list[str]:
         return "pending"
 
     notes = []
-    for line, key, detail in [*instruction_events(program, day),
-                              *line_instruction_events(program)]:
+    for line, key, detail in instruction_events(program, day):
         add_event(conn, program, line, "instruction", key, detail,
                   status(line, committed_at(program.repo, detail)))
+    # A line's own instruction is what the scientist is still writing (answers
+    # from the dashboard, a discussion's conclusion): it waits, held, until the
+    # scientist presses Start for the line.
+    for line, key, detail in line_instruction_events(program):
+        seen = status(line, committed_at(program.repo, detail)) == "seen"
+        add_event(conn, program, line, "instruction", key, detail, "seen" if seen else "held")
     for line, key, detail in timer_events(conn, program, now_utc()):
         add_event(conn, program, line, "timer", key, detail)
     for line, review in challenged_lines(program).items():
@@ -341,6 +362,9 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
     day = today(program, at).isoformat()
     pending = conn.execute("SELECT * FROM events WHERE program = ? AND status = 'pending' "
                            "ORDER BY id", (program.name,)).fetchall()
+    unstarted = {r["line"] for r in conn.execute(
+        "SELECT DISTINCT line FROM events WHERE program = ? AND status = 'held'",
+        (program.name,))}
     by_line: dict[str, list] = {}
     for event in pending:
         by_line.setdefault(event["line"], []).append(event)
@@ -354,6 +378,14 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
         if line in held:
             waiting.append(f"{line} is paused: {held[line]} (resume with `program serve "
                            f"--resume {program.name}:{line}`)")
+            continue
+        asked = any(e["kind"] == "start" for e in events)
+        if line in unstarted and not asked:
+            waiting.append(f"{line} has instructions from {program.scientist} that aren't "
+                           "started; its runs wait for Start")
+            continue
+        if asked:  # the scientist asked for this run: no daily limit, no gap
+            ready.append(Due(line, events))
             continue
         runs_today, failed_today = conn.execute(
             "SELECT COALESCE(SUM(counted), 0), COALESCE(SUM(1 - counted), 0) FROM runs "
@@ -416,6 +448,9 @@ def prompts(program: Program, line: str, stem: str, events: list,
         worker.append(f"Your part of the instruction is the `## {line}` section of "
                       f"{instruction}, with anything above the first line section. If an "
                       "earlier run already answered it, deal only with what is new.")
+    elif any(e["kind"] == "start" for e in events):
+        worker.append(f"{program.scientist} asked for this run without a new instruction: carry "
+                      "the line on from its progress notes.")
     else:
         worker.append("There is no new instruction for this line: deal with what started the "
                       "run, and if nothing needs doing, say so in the summary and stop.")

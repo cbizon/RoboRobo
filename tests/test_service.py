@@ -3,6 +3,7 @@ agent that writes the summary or review it is asked for, and (for job
 events) the stand-in cluster from test_cluster."""
 
 import json
+import re
 import subprocess
 import sys
 from datetime import timedelta
@@ -541,22 +542,6 @@ def test_wake_under_the_service_sets_a_timer(served, tmp_path, monkeypatch, caps
         "L0001", "collect the pilot", 0)
 
 
-def test_a_lines_own_instruction_starts_its_run(served, tmp_path):
-    db = conn(tmp_path)
-    look(served, db)
-    (served / "lines" / "L0003").mkdir(parents=True)
-    (served / "lines" / "L0003" / "instruction.md").write_text("Try the fan at half speed.\n")
-    commit(served, "an instruction for the fan line")
-    look(served, db)
-    assert [r["line"] for r in runs(db)] == ["L0003"]
-    assert "Your instruction is lines/L0003/instruction.md, this line's own." in prompts(tmp_path)[0]
-    look(served, db)
-    assert len(runs(db)) == 1  # unchanged, so not run again
-    (served / "lines" / "L0003" / "instruction.md").write_text("Now at full speed.\n")
-    commit(served, "changed")
-    look(served, db)
-    assert len(runs(db)) == 2
-
 
 def test_the_service_keeps_rendered_files_in_step_with_roborobo(served, tmp_path):
     db = conn(tmp_path)
@@ -681,26 +666,6 @@ def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
     assert code == 403 and "L0002 is active; from there it can be made closed or paused" in said
 
 
-def test_answer_a_question_from_the_dashboard_and_the_line_runs(served, tmp_path, acting):
-    db = conn(tmp_path)
-    look(served, db)
-    code, said = acting(action="instruct", line="L0001", text="Yes, go higher.",
-                        question="Should the heater go higher?")
-    assert code == 200 and "Your instruction for L0001 is recorded." in said
-    text = (served / "lines" / "L0001" / "instruction.md").read_text()
-    assert "> Should the heater go higher?" in text and "Yes, go higher." in text
-    assert "Pat, from the dashboard" in text
-    look(served, db)
-    assert [r["line"] for r in runs(db)] == ["L0001"]  # the instruction started the line
-    code, _ = acting(action="instruct", line="L0001", text="Then try the spare.")
-    assert code == 200
-    text = (served / "lines" / "L0001" / "instruction.md").read_text()
-    assert text.index("Yes, go higher.") < text.index("Then try the spare.")  # newest last
-    code, said = acting(action="instruct", line="L0001", text="   ")
-    assert code == 403 and "nothing was written" in said
-    code, said = acting(action="instruct", line="L9999", text="x")
-    assert code == 403
-
 
 def test_resume_a_paused_line_from_the_dashboard(served, tmp_path, acting):
     db = conn(tmp_path)
@@ -811,28 +776,6 @@ def test_answer_boxes_are_full_width(served, tmp_path, monkeypatch):
     assert "<form class='act wide'" in page and "form.act.wide { display: block" in page
 
 
-def test_an_instruction_shows_on_the_page_at_once_and_wakes_the_service(served, tmp_path, acting):
-    """Chris, Nov 23: "When I instruct a line, I get no feedback. Nothing
-    changes as far as I can see, certainly not in the home page." """
-    from roborobo import actions
-    db = conn(tmp_path)
-    look(served, db)
-    actions.WAKE.clear()
-    code, said = acting(action="instruct", line="L0001", referer="/demo/lines/L0001.html",
-                        text="Is anything left to do here, or has the phase diagram superseded it?")
-    assert code == 200 and "recorded" in said  # sent back to the line's page with this banner
-    assert actions.WAKE.is_set()  # the service looks now, not at its next poll
-    index = (tmp_path / "state" / "dashboard" / "index.html").read_text()  # redrawn already
-    assert "<b>Your instruction</b>" in index and "Is anything left to do here" in index
-    assert "recorded; the service picks it up within a minute" in index
-    assert "href='demo/docs/lines/L0001/instruction.md.html'" in index
-    assert 'get("said")' in index  # the page shows the banner it is sent back with
-    look(served, db)
-    after = dashboard_page(served, tmp_path, db)
-    assert "answered by run" in after.split("<b>Your instruction</b>")[1].split("</div>")[0]
-    line_page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
-    assert "<h3>Your latest instruction</h3>" in line_page
-
 
 def test_close_a_line_from_the_dashboard_with_why(served, tmp_path, acting):
     db = conn(tmp_path)
@@ -857,3 +800,148 @@ def test_close_a_line_from_the_dashboard_with_why(served, tmp_path, acting):
     assert any("L0001 isn't active" in n for n in look(served, db))  # a closed line doesn't run
     code, said = acting(action="line-status", line="L0001", status="active")
     assert code == 200 and "L0001 is made active." in said
+
+
+def row(index, lid):
+    return index.split(f"data-line='demo/{lid}'")[1].split("</tr>")[0]
+
+
+def live_index(tmp_path):
+    return (tmp_path / "state" / "dashboard" / "index.html").read_text()
+
+
+def test_answers_wait_for_start_then_run_together(served, tmp_path, acting):
+    """Chris, Nov 24: answering several questions may take hours; nothing should
+    start until a Start button says "I've done everything I want to do"."""
+    from roborobo import actions
+    db = conn(tmp_path)
+    look(served, db)
+    code, said = acting(action="instruct", line="L0001", text="Yes, go higher.",
+                        question="Should the heater go higher?")
+    assert code == 200 and "Nothing starts yet" in said
+    text = (served / "lines" / "L0001" / "instruction.md").read_text()
+    assert "> Should the heater go higher?" in text and "Pat, from the dashboard" in text
+    assert "<b>Your instruction</b>" in live_index(tmp_path)  # on the page at once
+    look(served, db)
+    look(served, db)
+    assert runs(db) == []  # saved, not started
+    assert "Ready when you are" in row(dashboard_page(served, tmp_path, db), "L0001")
+    code, _ = acting(action="instruct", line="L0001", text="And try the spare heater.")
+    assert code == 200
+    look(served, db)
+    assert runs(db) == []
+    actions.WAKE.clear()
+    code, said = acting(action="start", line="L0001")
+    assert code == 200 and "L0001 starts within a minute, with your 2 new instructions." in said
+    assert actions.WAKE.is_set()
+    assert ">Starting</span>" in row(live_index(tmp_path), "L0001")
+    look(served, db)
+    (ran,) = runs(db)  # one run for both answers
+    assert ran["line"] == "L0001"
+    assert "Your instruction is lines/L0001/instruction.md" in prompts(tmp_path)[0]
+    after = dashboard_page(served, tmp_path, db)
+    assert "answered by run" in row(after, "L0001") and ">Idle</span>" in row(after, "L0001")
+    code, said = acting(action="instruct", line="L0001", text="   ")
+    assert code == 403 and "nothing was written" in said
+
+
+def test_start_runs_a_line_whatever_its_limits_and_without_an_instruction(served, tmp_path, acting):
+    toml = served / "program.toml"
+    toml.write_text(toml.read_text().replace("min_minutes_between_runs = 0",
+                                             "min_minutes_between_runs = 600\n"
+                                             "max_runs_per_line_per_day = 1"))
+    commit(served, "tight limits")
+    assert run("approve", "--repo", served) == 0
+    db = conn(tmp_path)
+    look(served, db)
+    instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
+    look(served, db)
+    assert len(runs(db)) == 1
+    code, said = acting(action="start", line="L0001")
+    assert code == 200 and "from its progress notes (no new instruction)" in said
+    look(served, db)
+    assert len(runs(db)) == 2  # despite one run a day and a ten-hour gap
+    assert "asked for this run without a new instruction" in prompts(tmp_path)[2]
+    code, said = acting(action="start", line="L0002")
+    assert code == 403 and "L0002 is proposed; make it active first" in said
+
+
+def test_a_lines_automatic_runs_wait_while_instructions_are_unstarted(served, tmp_path, acting):
+    db = conn(tmp_path)
+    look(served, db)
+    acting(action="instruct", line="L0001", text="Hold on, I have more to say.")
+    look(served, db)
+    prog = config.load(served)
+    service.set_timer(tmp_path / "state" / "service.db", prog, "L0001",
+                      service.now_utc() + timedelta(minutes=11), "collect a job")
+    db.execute("UPDATE timers SET due = ?", ((service.now_utc() - timedelta(minutes=1)).isoformat(),))
+    db.commit()
+    notes = look(served, db)
+    assert runs(db) == []
+    assert any("L0001 has instructions from Pat that aren't started" in n for n in notes)
+    acting(action="start", line="L0001")
+    look(served, db)
+    assert len(runs(db)) == 1  # one run: the instruction and the timer together
+
+
+def test_an_instruction_pushed_from_a_discussion_waits_for_start_too(served, tmp_path, acting):
+    db = conn(tmp_path)
+    look(served, db)
+    (served / "lines" / "L0003").mkdir(parents=True)
+    (served / "lines" / "L0003" / "instruction.md").write_text(
+        "# Instructions for L0003\n\n## 2026-11-24 09:00, Pat, from a discussion\n\n"
+        "Try the fan at half speed.\n")
+    commit(served, "an instruction from a discussion")
+    look(served, db)
+    assert runs(db) == []
+    index = dashboard_page(served, tmp_path, db)
+    assert "Ready when you are" in row(index, "L0003") and "Try the fan at half speed." in row(index, "L0003")
+    acting(action="start", line="L0003")
+    look(served, db)
+    assert [r["line"] for r in runs(db)] == ["L0003"]
+
+
+def test_every_line_shows_its_state(served, tmp_path, monkeypatch):
+    monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
+    db = conn(tmp_path)
+    look(served, db)
+    prog = config.load(served)
+    index = dashboard_page(served, tmp_path, db)
+    assert "<span class='state state-idle'>Idle</span>" in row(index, "L0001")
+    assert "<button>Start</button>" in row(index, "L0001")
+    assert "<span class='state state-proposed'>Proposed</span>" in row(index, "L0002")
+    assert "<button>Start</button>" not in row(index, "L0002")
+    asked = {"date": "2026-11-17", "line_id": "L0003", "instruction": "none",
+             "headline": "A run with a question.", "experiments": [], "claims_changed": [],
+             "questions": [{"question": "Should the fan go faster?",
+                            "why_it_matters": "It decides the next run.",
+                            "default_if_unanswered": "Keep it where it is."}],
+             "budget": {}, "open_blockers": [],
+             "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
+    (served / "sessions" / "2026-11-17-L0003.json").write_text(json.dumps(asked))
+    commit(served, "a run that asks")
+    service.pause_line(db, prog, "L0001", "a merge conflicted")
+    index = dashboard_page(served, tmp_path, db)
+    assert "<span class='state state-you'>Asks you 1 question</span>" in row(index, "L0003")
+    assert "<span class='state state-stuck'>Stopped: needs fixing</span>" in row(index, "L0001")
+    assert "<button>Start</button>" not in row(index, "L0001")
+    service.resume(db, "demo:L0001")
+    db.execute("INSERT INTO runs (program, line, day, stem, started, reasons) VALUES "
+               "('demo', 'L0001', '2026-11-24', '2026-11-24-L0001', ?, '[]')",
+               (service.now_utc().isoformat(),))
+    db.commit()
+    index = dashboard_page(served, tmp_path, db)
+    assert "<span class='state state-running'>Running</span>" in row(index, "L0001")
+    page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0003.html").read_text()
+    assert "state-you" in page and "<button>Start L0003</button>" in page
+
+
+def test_the_discuss_thread_writes_the_lines_own_instruction(served, tmp_path):
+    from urllib.parse import parse_qs, urlparse
+    import html
+    index = dashboard_page(served, tmp_path, conn(tmp_path))
+    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", row(index, "L0001")).group(1))
+    prompt = parse_qs(urlparse(link).query)["q"][0]
+    assert "append it to lines/L0001/instruction.md" in prompt
+    assert "give me the `git push` command" in prompt and "press Start on L0001" in prompt
+    assert "instructions/" not in prompt
