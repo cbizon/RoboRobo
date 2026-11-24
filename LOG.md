@@ -4,6 +4,24 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (dashboard: terms, links, what's next)
+
+- Chris, reading the dashboard: the language is dense ("what's an
+  impulse-step method?"), L0009 should be a link, clusterlifter.md is
+  mentioned on the first page but not linked, the answer box is squeezed,
+  and L0001 says what was done but not what's next or what would close it.
+- Wherever record text is shown, a term or alias from `terms.jsonl` gets
+  its definition on hover and links to a new terms page; a line's id (and
+  its name, as written) links to the line's page; a document's path or
+  file name links to its page.
+- Lines gain `next` and `closes_when`. The dashboard shows both for every
+  line ("not recorded" until a run supplies them) with the lines it came
+  from, branches into and feeds. The brief asks for them with every state
+  update, and for every name used in a state, headline, answer or
+  question to be defined in `terms.jsonl`.
+- Answer and instruction boxes are full width; a line's page has an answer
+  box under each question.
+
 ## 2026-11-23 (the service locked its own database)
 
 - The service crashed with "database is locked" whenever a cluster job
