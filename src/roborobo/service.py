@@ -49,7 +49,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from roborobo import ROOT, cluster, config, dashboard, lines, render, service_api
+from roborobo import ROOT, actions, cluster, config, dashboard, lines, render, service_api
 from roborobo.config import Program
 from roborobo.gitutil import committed_at, git
 from roborobo.mapview import fold_lines
@@ -697,6 +697,7 @@ def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = Fals
                 errors[Path(repo).name] = traceback.format_exc().strip().splitlines()[-6:]
         write_status(state, conn, {**looks, **{n: ["error (tried again at the next look):",
                                                     *lines] for n, lines in errors.items()}})
+        (state / "looks.json").write_text(json.dumps({"looks": looks, "errors": errors}))
         dashboard.write(state, conn, programs, looks, errors)
         for name, notes in [*looks.items(), *errors.items()]:
             for note in notes:
@@ -708,4 +709,6 @@ def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = Fals
             # updates RoboRobo, and the next look syncs each program's rendered files.
             print("RoboRobo has changed on its remote; restarting to update", flush=True)
             sys.exit(0)
-        time.sleep(poll_minutes * 60)
+        # Until the next poll, or at once when the scientist acts from the dashboard.
+        actions.WAKE.wait(poll_minutes * 60)
+        actions.WAKE.clear()

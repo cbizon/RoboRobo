@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import markdown
@@ -75,6 +75,10 @@ form.act { display: inline-block; margin: 6px 8px 0 0; }
 form.act.wide { display: block; margin-right: 0; }
 form.act textarea { display: block; box-sizing: border-box; width: 100%; min-height: 80px;
   margin-bottom: 4px; font: inherit; }
+.said { background: var(--good); color: var(--surface); border-radius: 8px; padding: 10px 14px;
+  margin-bottom: 12px; }
+.status { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+tr.inactive td { opacity: .75; }
 a.term { color: inherit; text-decoration: underline dotted; cursor: help; }
 .ahead { margin-top: 6px; font-size: .88rem; }
 form.act button { font: inherit; padding: 3px 12px; border-radius: 6px;
@@ -107,9 +111,20 @@ def signature(line: dict, summary: str | None, review: str | None) -> str:
 # was seen is kept in the browser only (localStorage); without it, nothing is
 # marked and the page reads the same.
 MARK_NEW = """<script>
+document.querySelectorAll(".show-inactive").forEach(function (box) {
+  var rows = box.closest("label").nextElementSibling.querySelectorAll("tr.inactive");
+  function apply() { rows.forEach(function (row) { row.hidden = !box.checked; }); }
+  try { box.checked = localStorage.getItem("roborobo:show-inactive") === "1"; } catch (e) {}
+  apply();
+  box.addEventListener("change", function () {
+    try { localStorage.setItem("roborobo:show-inactive", box.checked ? "1" : "0"); } catch (e) {}
+    apply();
+  });
+});
 try {
   document.querySelectorAll("tr[data-line]").forEach(function (row) {
-    if (localStorage.getItem("roborobo:" + row.dataset.line) !== row.dataset.sig) {
+    if (!row.classList.contains("inactive") &&
+        localStorage.getItem("roborobo:" + row.dataset.line) !== row.dataset.sig) {
       row.querySelector(".new").hidden = false;
     }
   });
@@ -255,12 +270,64 @@ def ahead(line: dict, m: Marks) -> str:
             f"<b>Closes when:</b> {m(line['closes_when']) if line.get('closes_when') else missing}")
 
 
+# After an action the page comes back with ?said=...; show it once, at the top.
+SAID = """<script>
+(function () {
+  var said = new URLSearchParams(location.search).get("said");
+  if (!said) return;
+  var banner = document.createElement("div");
+  banner.className = "said";
+  banner.textContent = said;
+  document.body.insertBefore(banner, document.body.firstChild);
+  history.replaceState(null, "", location.pathname);
+})();
+</script>"""
+
+
+def instruction_status(conn: sqlite3.Connection, program: Program, lid: str,
+                       base: str) -> str:
+    """The scientist's latest instruction to a line and what has happened to
+    it, or nothing if the line has no instruction of its own."""
+    path = program.repo / "lines" / lid / "instruction.md"
+    if not path.is_file():
+        return ""
+    raw = path.read_bytes()
+    entries = [e for e in raw.decode(errors="replace").split("\n## ")[1:] if e.strip()]
+    if not entries:
+        return ""
+    heading, _, body = entries[-1].partition("\n")
+    words = " ".join(line for line in body.splitlines() if not line.startswith(">")).split()
+    excerpt = " ".join(words)
+    excerpt = excerpt if len(excerpt) <= 160 else excerpt[:157].rsplit(" ", 1)[0] + "…"
+    key = f"instruction:lines/{lid}/instruction.md:{hashlib.sha256(raw).hexdigest()[:12]}"
+    event = conn.execute("SELECT status, run FROM events WHERE program = ? AND key = ?",
+                         (program.name, key)).fetchone()
+    if event is None:
+        status = "recorded; the service picks it up within a minute"
+    elif event["status"] == "pending":
+        status = "waiting to start (see In flight)"
+    elif event["run"]:
+        run = conn.execute("SELECT stem, ended, summary FROM runs WHERE id = ?",
+                           (event["run"],)).fetchone()
+        if run and not run["ended"]:
+            status = f"run {run['stem']} is working on it now"
+        elif run and run["summary"]:
+            status = f"answered by run {run['stem']}"
+        else:
+            status = f"run {run['stem'] if run else '?'} ended without a summary"
+    else:
+        status = event["status"]
+    link = f"<a class=doc href='{esc(base)}docs/lines/{esc(lid)}/instruction.md.html'>"
+    return (f"<b>Your instruction</b> <span class=meta>({esc(heading.split(',')[0].strip())})"
+            f"</span>: {link}{esc(excerpt)}</a><br><span class=meta>→ {esc(status)}</span>")
+
+
 def page(title: str, body: str, refresh: bool = False) -> str:
     return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width, initial-scale=1'>"
             + ("<meta http-equiv=refresh content=60>" if refresh else "")
             + f"<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}"
-            + (ACT if "<form class='act" in body else "") + "</body></html>")
+            + (ACT if "<form class='act" in body else "") + SAID + "</body></html>")
 
 
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
@@ -472,12 +539,17 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
            f"program map</a> · <a href='{esc(program.name)}/terms.html'>terms</a></p>", "<h3>Needs you</h3>", "<div class=needs>"]
     out += [f"<div class='card {kind}'>{text}</div>" for kind, text in needs] or [
         "<div class=card style='border-left-color:var(--good)'>Nothing.</div>"]
-    out.append("</div><h3>Lines</h3><table><tr><th>Line</th><th>Where it stands</th>"
+    out.append("</div><h3>Lines</h3>")
+    inactive = sum(1 for line in lines.values() if line.get("status") != "active")
+    if inactive:  # directly before the table: the page's script finds the rows from here
+        out.append(f"<label class=meta><input type=checkbox class=show-inactive> Show the "
+                   f"{inactive} paused, closed, dropped and proposed lines</label>")
+    out.append("<table><tr><th>Line</th><th>Where it stands</th>"
                "<th>Last heard</th><th>Last run</th><th>Checker</th><th>In flight</th>"
                "<th></th></tr>")
-    for lid, line in sorted(lines.items()):
-        if line.get("status") != "active":
-            continue
+    for lid, line in sorted(lines.items(), key=lambda item: (item[1].get("status") != "active",
+                                                             item[0])):
+        is_active = line.get("status") == "active"
         last = next((r for r in runs if r["line"] == lid), None)
         session = sessions.get(lid)
         review = reviews.get(lid)
@@ -519,10 +591,16 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         links = related(lines, lid, f"{program.name}/")
         stands += (f"<div class=ahead>{ahead(line, m)}"
                    + (f"<br><span class=meta>{links}</span>" if links else "") + "</div>")
+        told = instruction_status(conn, program, lid, f"{program.name}/")
+        if told:
+            stands += f"<div class=ahead>{told}</div>"
         sig = signature(line, session[0] if session else None, review[0] if review else None)
-        out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'>"
+        status = "" if is_active else f"<br><span class=status>{esc(line.get('status', ''))}</span>"
+        out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'"
+                   + ("" if is_active else " class=inactive hidden") + ">"
                    f"<td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
-                   f"</b></a><span class=new hidden>new</span><br>{esc(line.get('name', ''))}</td>"
+                   f"</b></a><span class=new hidden>new</span><br>{esc(line.get('name', ''))}"
+                   f"{status}</td>"
                    f"<td>{stands}</td><td>{heard_text}</td>"
                    f"<td>{run_text}</td><td>{check}</td>"
                    f"<td>{'<br>'.join(flight) or '<span class=none>nothing</span>'}</td>"
@@ -617,11 +695,26 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
         out += [f"<li>{esc(r['stem'])}: {esc('; '.join(json.loads(r['problems'])))}</li>"
                 for r in failed]
         out.append("</ul>")
+    told = instruction_status(conn, program, lid, "../")
+    if told:
+        out += ["<h3>Your latest instruction</h3>", f"<p>{told}</p>"]
     instruct = form(program, "instruct", f"Instruct {lid}", lid,
                     "<textarea name=text required placeholder='An instruction for this line; it is "
                     "added to the line&#39;s instruction file and starts the line'></textarea>")
     if instruct:
         out += ["<h3>Instruct this line</h3>", instruct]
+    now_is = line.get("status", "active")
+    why = "<textarea name=comment required placeholder='Why? Saved as your note on the line'></textarea>"
+    changes = {"active": [("closed", f"Close {lid}", why), ("paused", f"Pause {lid}", why)],
+               "paused": [("active", f"Resume {lid} (make it active)", ""),
+                          ("closed", f"Close {lid}", why)],
+               "closed": [("active", f"Reopen {lid}", "")],
+               "dropped": [("active", f"Reopen {lid}", "")],
+               "proposed": [("active", "Make it active", ""), ("dropped", "Drop it", "")]}
+    forms = [form(program, "line-status", button, lid, fields, status=status)
+             for status, button, fields in changes.get(now_is, [])]
+    if any(forms):
+        out += [f"<h3>This line is {esc(now_is)}</h3>", *forms]
     if line.get("notes"):
         out.append("<h3>Notes</h3>")
         out += [f"<div class=card><span class=meta>{esc(n.get('night', n['at'][:10]))}, "
@@ -714,6 +807,15 @@ class QuietHandler(SimpleHTTPRequestHandler):
             said, code = actions.perform(self.state, self.repos, fields), 200
         except actions.Refused as refused:
             said, code = f"Not done: {refused}", 403
+        if code == 200:
+            # Show it at once: redraw the pages, then go back to where the form was.
+            rerender(self.state, self.repos)
+            back = urlsplit(self.headers.get("Referer", "")).path or "/index.html"
+            self.send_response(303)
+            self.send_header("Location", f"{back}?{urlencode({'said': said})}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         forget = ("<p><a href='#' onclick=\"try{localStorage.removeItem('roborobo:token')}"
                   "catch(e){};this.textContent='Forgotten.';return false\">Forget the token in "
                   "this browser</a></p>") if code == 403 else ""
@@ -725,6 +827,19 @@ class QuietHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def rerender(state: Path, repos: list[Path]) -> None:
+    """Redraw the dashboard now (after an action), with the notes of the
+    service's last look."""
+    from roborobo import config, service
+    saved = state / "looks.json"
+    last = json.loads(saved.read_text()) if saved.exists() else {"looks": {}, "errors": {}}
+    conn = service.connect(state / "service.db")
+    try:
+        write(state, conn, [config.load(repo) for repo in repos], last["looks"], last["errors"])
+    finally:
+        conn.close()
 
 
 def serve_http(state: Path, host: str, port: int, repos: list[Path] = ()) -> ThreadingHTTPServer:

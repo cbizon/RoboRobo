@@ -345,7 +345,9 @@ def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
             "proposed</b> by the agent: Spare heater. One is one sample.") in page
     assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><span class=new hidden>new</span><br>Heater" in page
     assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><span class=new hidden>new</span><br>Fan" in page
-    assert "lines/L0002.html'><b>" not in page  # only active lines get a row
+    hidden = page.split("data-line='demo/L0002'")[1].split(">")[0]
+    assert "class=inactive hidden" in hidden  # other lines are there, behind the toggle
+    assert "Show the 1 paused, closed, dropped and proposed lines</label>\n<table>" in page
     assert f"{day}-L0001" in page and "A quiet run." in page and "no claims" in page
     link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", page).group(1))
     query = parse_qs(urlparse(link).query)
@@ -615,19 +617,32 @@ TOKEN = "the-scientists-dashboard-token"
 def acting(served, tmp_path, monkeypatch):
     """The dashboard served with a token; returns a function that posts a form."""
     from urllib.error import HTTPError
-    from urllib.parse import urlencode
-    from urllib.request import urlopen
+    from urllib.parse import parse_qs, urlencode, urlsplit
+    from urllib.request import HTTPRedirectHandler, Request, build_opener
     from roborobo import dashboard
     monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
     conn(tmp_path)  # the service's database exists
     server = dashboard.serve_http(tmp_path / "state", "127.0.0.1", 0, [served])
     url = f"http://127.0.0.1:{server.server_address[1]}/action"
 
-    def post(token=TOKEN, **fields):
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = build_opener(NoRedirect)
+
+    def post(token=TOKEN, referer="/index.html", **fields):
+        """Returns 200 and what the page will say (a done action redirects back
+        with it), or the refusal's code and page."""
         data = urlencode({"program": "demo", "token": token, **fields}).encode()
+        request = Request(url, data=data, headers={"Referer": f"http://dashboard{referer}"})
         try:
-            return 200, urlopen(url, data=data).read().decode()
+            return 200, opener.open(request).read().decode()
         except HTTPError as error:
+            if error.code == 303:
+                where = urlsplit(error.headers["Location"])
+                assert where.path == referer
+                return 200, parse_qs(where.query)["said"][0]
             return error.code, error.read().decode()
 
     yield post
@@ -663,7 +678,7 @@ def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
     assert git(served, "rev-parse", "HEAD") == git(served, "rev-parse", "origin/main")  # pushed
     assert run("check", "--repo", served) == 0
     code, said = acting(action="line-status", line="L0002", status="dropped")
-    assert code == 403 and "L0002 is active, not proposed" in said
+    assert code == 403 and "L0002 is active; from there it can be made closed or paused" in said
 
 
 def test_answer_a_question_from_the_dashboard_and_the_line_runs(served, tmp_path, acting):
@@ -671,7 +686,7 @@ def test_answer_a_question_from_the_dashboard_and_the_line_runs(served, tmp_path
     look(served, db)
     code, said = acting(action="instruct", line="L0001", text="Yes, go higher.",
                         question="Should the heater go higher?")
-    assert code == 200 and "Added to lines/L0001/instruction.md" in said
+    assert code == 200 and "Your instruction for L0001 is recorded." in said
     text = (served / "lines" / "L0001" / "instruction.md").read_text()
     assert "> Should the heater go higher?" in text and "Yes, go higher." in text
     assert "Pat, from the dashboard" in text
@@ -693,7 +708,7 @@ def test_resume_a_paused_line_from_the_dashboard(served, tmp_path, acting):
     page = dashboard_page(served, tmp_path, db)
     assert "<button>Resume L0001</button>" in page
     code, said = acting(action="resume", line="L0001")
-    assert code == 200 and "demo:L0001 will run again" in said
+    assert code == 200 and "demo:L0001 is resumed" in said
     assert db.execute("SELECT COUNT(*) FROM paused_lines").fetchone()[0] == 0
     code, said = acting(action="resume", line="L0001")
     assert code == 403 and "isn&#x27;t paused" in said
@@ -794,3 +809,51 @@ def test_answer_boxes_are_full_width(served, tmp_path, monkeypatch):
     dashboard_page(served, tmp_path, conn(tmp_path))
     page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
     assert "<form class='act wide'" in page and "form.act.wide { display: block" in page
+
+
+def test_an_instruction_shows_on_the_page_at_once_and_wakes_the_service(served, tmp_path, acting):
+    """Chris, Nov 23: "When I instruct a line, I get no feedback. Nothing
+    changes as far as I can see, certainly not in the home page." """
+    from roborobo import actions
+    db = conn(tmp_path)
+    look(served, db)
+    actions.WAKE.clear()
+    code, said = acting(action="instruct", line="L0001", referer="/demo/lines/L0001.html",
+                        text="Is anything left to do here, or has the phase diagram superseded it?")
+    assert code == 200 and "recorded" in said  # sent back to the line's page with this banner
+    assert actions.WAKE.is_set()  # the service looks now, not at its next poll
+    index = (tmp_path / "state" / "dashboard" / "index.html").read_text()  # redrawn already
+    assert "<b>Your instruction</b>" in index and "Is anything left to do here" in index
+    assert "recorded; the service picks it up within a minute" in index
+    assert "href='demo/docs/lines/L0001/instruction.md.html'" in index
+    assert 'get("said")' in index  # the page shows the banner it is sent back with
+    look(served, db)
+    after = dashboard_page(served, tmp_path, db)
+    assert "answered by run" in after.split("<b>Your instruction</b>")[1].split("</div>")[0]
+    line_page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
+    assert "<h3>Your latest instruction</h3>" in line_page
+
+
+def test_close_a_line_from_the_dashboard_with_why(served, tmp_path, acting):
+    db = conn(tmp_path)
+    look(served, db)
+    code, said = acting(action="line-status", line="L0001", status="closed", comment="  ")
+    assert code == 403 and "say why" in said
+    code, said = acting(action="line-status", line="L0001", status="closed",
+                        comment="The phase diagram lines have superseded it.")
+    assert code == 200 and "L0001 is closed. Your comment is saved as a note" in said
+    update, note = [json.loads(row) for row in
+                    (served / "ledger" / "lines.jsonl").read_text().splitlines()[-2:]]
+    assert (update["status"], update["by"]) == ("closed", "human")
+    assert note["text"] == "Closed by Pat: The phase diagram lines have superseded it."
+    assert run("check", "--repo", served) == 0
+    index = (tmp_path / "state" / "dashboard" / "index.html").read_text()
+    row = index.split("data-line='demo/L0001'")[1].split("</tr>")[0]
+    assert "class=inactive hidden" in row and "<span class=status>closed</span>" in row
+    page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
+    assert "<h3>This line is closed</h3>" in page and "<button>Reopen L0001</button>" in page
+    assert "Closed by Pat: The phase diagram lines have superseded it." in page
+    instruct(served, "## L0001 Heater\n\n1. One more thing.\n")
+    assert any("L0001 isn't active" in n for n in look(served, db))  # a closed line doesn't run
+    code, said = acting(action="line-status", line="L0001", status="active")
+    assert code == 200 and "L0001 is made active." in said
