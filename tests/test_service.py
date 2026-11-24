@@ -57,9 +57,13 @@ else:
                                 "falsified_if": "The drift stays with the heater off.",
                                 "cost_estimate": {"cpu_hours": 1}}) + "\n")
         subprocess.run(["git", "add", "ledger/experiments.jsonl"], check=True)
-    if mode == "program-md":  # two lines rewriting the same lines of PROGRAM.md
-        with open("PROGRAM.md", "w") as f:
-            f.write(f"# Program\n\nWhere things stand, as {lid} sees it.\n")
+    if mode == "same-file":  # two lines writing the same new file differently
+        with open("method.md", "w") as f:
+            f.write(f"# Method\n\nHow it is done, as {lid} sees it.\n")
+        subprocess.run(["git", "add", "method.md"], check=True)
+    if mode == "section":  # each line adds its own section to PROGRAM.md
+        with open("PROGRAM.md", "a") as f:
+            f.write(f"\n### {lid}\n\nWhere {lid} stands after this run.\n")
         subprocess.run(["git", "add", "PROGRAM.md"], check=True)
 with open(path, "w") as f:
     json.dump(doc, f)
@@ -265,10 +269,10 @@ def test_a_conflicting_push_pauses_the_program(served, tmp_path):
     elsewhere = tmp_path / "laptop"
     origin = git(served, "remote", "get-url", "origin").strip()
     subprocess.run(["git", "clone", "-q", origin, str(elsewhere)], check=True)
-    (elsewhere / "PROGRAM.md").write_text("one version\n")
+    (elsewhere / "method.md").write_text("one version\n")
     commit(elsewhere, "theirs")
     git(elsewhere, "push", "-q", "origin", "main")
-    (served / "PROGRAM.md").write_text("another version\n")
+    (served / "method.md").write_text("another version\n")
     commit(served, "ours")
     notes = look(served, db)
     assert notes[0].startswith("paused: merging origin/main conflicts")
