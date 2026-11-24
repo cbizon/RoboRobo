@@ -4,6 +4,14 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (room for parallel lines on Sterling)
+
+- An agent pod's ephemeral-storage limit goes from 1Gi to 256Mi, with its
+  temporary files on the volume. The namespace allows 4Gi of those limits
+  in all and other pods use about 2.75Gi, so at 1Gi only one line could
+  run at a time whatever `max_parallel_lines` said. At 256Mi four fit with
+  room to spare (five is the exact ceiling); CPU allows about five.
+
 ## 2026-11-23 (dashboard: what changed)
 
 - The dashboard marks a line "new" when its state, latest summary, latest

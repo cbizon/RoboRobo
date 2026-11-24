@@ -33,8 +33,9 @@ def test_the_agent_pod_holds_no_keys():
     assert pod["imagePullSecrets"] == [{"name": "registry-credentials"}]  # the image is private
     assert all("secret" not in v for v in pod["volumes"])  # no ssh keys, no deploy key
     assert [m["mountPath"] for m in container["volumeMounts"]] == [
-        "/Users/bizon", "/Users/bizon/Projects", "/Users/bizon/.cache/uv"]
-    assert [m.get("subPath") for m in container["volumeMounts"]] == [None, "Projects", ".cache/uv"]
+        "/Users/bizon", "/Users/bizon/Projects", "/Users/bizon/.cache/uv", "/Users/bizon/.tmp"]
+    assert [m.get("subPath") for m in container["volumeMounts"]] == [
+        None, "Projects", ".cache/uv", ".tmp"]
     env = {e["name"]: e for e in container["env"]}
     assert env["CLAUDE_CODE_OAUTH_TOKEN"]["valueFrom"]["secretKeyRef"]["name"] == \
         "claude-provider-credentials"
@@ -217,7 +218,7 @@ def test_a_job_deleted_by_hand_is_not_an_error(tmp_path):
 def test_the_agent_pod_fits_the_namespaces_disk_quota():
     job = kube.manifest(settings(), "roborobo-x", ["claude"], "/repo", 60, "tok")
     limits = job["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
-    assert limits["ephemeral-storage"] == "1Gi"  # the quota is 4Gi in all, ~2.75Gi in use
+    assert limits["ephemeral-storage"] == "256Mi"  # the quota is 4Gi in all, ~2.75Gi in use
 
 
 def test_a_pod_that_cannot_pull_its_image_fails_the_run(tmp_path):

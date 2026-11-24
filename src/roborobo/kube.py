@@ -164,13 +164,17 @@ def manifest(settings: Settings, name: str, command: list[str], workdir: str,
             "volumeMounts": [
                 {"name": "scratch", "mountPath": home},
                 {"name": "home", "mountPath": f"{home}/Projects", "subPath": "Projects"},
-                {"name": "home", "mountPath": f"{home}/.cache/uv", "subPath": ".cache/uv"}],
-            # The namespace's quota on ephemeral-storage limits is 4Gi in all.
-            "resources": {"requests": {"cpu": "1", "memory": "4Gi", "ephemeral-storage": "100Mi"},
-                          "limits": {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "1Gi"}},
+                {"name": "home", "mountPath": f"{home}/.cache/uv", "subPath": ".cache/uv"},
+                # Temporary files go on the volume, so the pod needs little disk of
+                # its own: the scratch home only holds Claude Code's state.
+                {"name": "home", "mountPath": f"{home}/.tmp", "subPath": ".tmp"}],
+            # The namespace's quota on ephemeral-storage limits is 4Gi in all, with
+            # about 2.75Gi used by other pods; 256Mi each lets several lines run at once.
+            "resources": {"requests": {"cpu": "1", "memory": "4Gi", "ephemeral-storage": "50Mi"},
+                          "limits": {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "256Mi"}},
             "securityContext": {"allowPrivilegeEscalation": False,
                                 "capabilities": {"drop": ["ALL"]}}}],
-        "volumes": [{"name": "scratch", "emptyDir": {"sizeLimit": "1Gi"}},
+        "volumes": [{"name": "scratch", "emptyDir": {"sizeLimit": "200Mi"}},
                     {"name": "home", "persistentVolumeClaim": {"claimName": settings.volume}}],
     }
     if affinity:
