@@ -140,7 +140,10 @@ def test_delete_cluster_data(program):
     finished_job(program)
     run_dir = records(program)[0]["path"]
     assert subprocess.run(["test", "-d", run_dir]).returncode == 0
-    assert run("delete", "--repo", program, "A0001", "--reason", "superseded by a rerun") == 0
+    assert "deleting data on a cluster is Pat's to do" in run(
+        "delete", "--repo", program, "A0001", "--reason", "superseded by a rerun")
+    assert run("delete", "--repo", program, "A0001", "--by", "human", "--reason",
+               "superseded by a rerun") == 0
     assert subprocess.run(["test", "-d", run_dir]).returncode != 0
     deleted = records(program)[-1]
     assert (deleted["record"], deleted["artifact_id"], deleted["reason"]) == \
