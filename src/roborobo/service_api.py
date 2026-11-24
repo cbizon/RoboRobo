@@ -32,7 +32,8 @@ from pathlib import Path
 # next-id: ids come from the service, so lines running at once never collide.
 # wake: a line's timers live in the service's database.
 # cancel: scancel needs the service's key; a run cancels only jobs of its program.
-FORWARDED = {"submit", "jobs", "fetch", "check", "next-id", "wake", "cancel"}
+# record: it takes an artifact id, which must come from the service's database.
+FORWARDED = {"submit", "jobs", "fetch", "check", "next-id", "wake", "cancel", "record"}
 TIMEOUT_SECONDS = 30 * 60
 
 

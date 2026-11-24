@@ -26,6 +26,10 @@ def history(repo: Path, path: str) -> list[str]:
     return [line for line in out.split() if line]
 
 
+def is_merge(repo: Path, commit: str) -> bool:
+    return len(git(repo, "rev-list", "--parents", "-n", "1", commit).split()) > 2
+
+
 def committed_at(repo: Path, path: str) -> int:
     """When a path was last committed (Unix seconds), or 0 if it never was."""
     out = git(repo, "log", "-1", "--format=%ct", "--", path, check=False).strip()
