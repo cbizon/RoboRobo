@@ -14,8 +14,14 @@ for each phase):
   here or on a cluster, is recorded in the ledger with a manifest, and
   cluster outputs stay on the cluster.
 - **Structured budgets** that say where each limit applies.
-- **Phase 3 started:** `program serve`, the event-driven service, with its
-  container and Sterling manifests in `deploy/sterling/`. Not deployed yet.
+- **Phase 3, the service, is running on Sterling** (since Nov 22):
+  `program serve` runs sequel's lines on events, each run in a pod of its
+  own without the service's keys, each line in its own worktree and
+  branch. It serves the dashboard, keeps RoboRobo's rendered files
+  current, updates itself when RoboRobo's branch changes, and holds for
+  the Claude usage limit. The Mac's night runner is off.
+- **Approvals are signed** with the scientist's SSH key; nothing else that
+  can push to a program's repository can approve.
 
 `LOG.md` has the reasons for each.
 
@@ -586,26 +592,35 @@ Each phase is useful on its own, and the first tests the main idea cheaply.
    whether separate lines work better, and whether branch per line holds
    up.
 2. **The dashboard and Discuss button**, still reading the repository. The
-   map becomes the review page and the debrief task is retired. *Started
-   (Nov 23), served by the service: what needs you, a row per line, Discuss
-   links, the map beside it. Not yet: answering simple things on the page
-   (approve a line, allow a host), "changed since you last looked", retiring
-   the debrief. The `claude://code/new` link is still untested on the Mac.*
+   map becomes the review page and the debrief task is retired. *Built
+   (Nov 23), served by the service: what needs you, a row per line with
+   when it was last heard from, a page per line, every document a line
+   keeps rendered, Discuss links, the map beside it. Not yet: answering on
+   the page (approve a line, answer a question, resume a pause). The page
+   has no login and agent pods can reach it, so anything that writes needs
+   a way to know it is you first. Also not yet: "changed since you last
+   looked", and retiring the debrief.*
 3. **The service on Sterling.** `roborobo serve` with the inbox, timers and
    dispatcher; `program submit` with Sterling jobs and job-done events;
-   line runs in the pod. The dashboard moves into the service. *Started
-   (Nov 22): `program serve` merges what you push, turns new or changed
-   instruction sections, open challenges and ended Hatteras jobs into
-   events, and runs each line with pending events, one at a time, within
-   `[service]` limits per line (runs a day, gap between runs). A run that
-   breaks the repository, an invalid record or a conflicting merge pauses
-   the program. Container and manifests in `deploy/sterling/`; runs use a
-   token from `claude setup-token`. Not yet: agent-set timers, Sterling
-   jobs, branch per line, the dashboard in the service.*
+   line runs in the pod. The dashboard moves into the service. *Built
+   (Nov 22 to 23): `program serve` merges what you push, turns new or
+   changed instructions (dated files and a line's own
+   `lines/<line>/instruction.md`), open challenges, ended Hatteras jobs
+   and timers lines set (`program wake`) into events, and runs each line
+   with pending events in its own worktree and branch, merged into `main`
+   after a clean run, up to `max_parallel_lines` at once (1 until you
+   raise it), within `[service]` limits per line. Each run is a pod of its
+   own with no keys; cluster commands go through the service. A conflict
+   or a bad run pauses its line; an invalid record or a conflicting push
+   pauses the program. Not yet: Sterling as a compute host.*
 4. **More hosts and backends.** Sterling jobs, the local agent on the Mac,
    runs placed on hosts, roles in `program.toml`, a second worker harness,
-   a checker from another provider, per-line budgets. *Hatteras is built,
-   from the Mac.*
+   a checker from another provider, per-line budgets. *Built: Hatteras jobs (with `program cancel`),
+   a checker command of its own (`[runs] checker`), and `program move` to
+   take data recorded on the Mac to Hatteras. Not yet: a checker from
+   another provider in practice (it needs that provider's key and CLI in
+   the image), the local agent on the Mac, runs placed on hosts, per-line
+   budgets, a cap on active lines.*
 
 sequel moves to each phase as it's built, as it did for the `program`
 command.

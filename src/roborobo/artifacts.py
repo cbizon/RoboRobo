@@ -401,6 +401,10 @@ def delete(program: Program, aid: str, reason: str, by: str = "agent") -> str:
     if citing:
         raise SystemExit(f"{aid} is cited in {', '.join(citing)}; cited data can't be deleted")
     artifact = current[aid]
+    if artifact["host"] != here() and by != "human":
+        raise SystemExit(f"{aid} is on {artifact['host']}; deleting data on a cluster is "
+                         f"{program.scientist}'s to do (`program delete {aid} --by human "
+                         "--reason ...`)")
     where = located(artifact, program)
     if artifact["host"] == here():
         path = Path(where)

@@ -4,6 +4,15 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (deleting on a cluster)
+
+- `program delete` of data on a cluster needs `--by human`. Sequel's
+  direction says the agent deletes nothing on Hatteras, and nothing
+  enforced it. It is a label, not a lock, where the agent runs as the
+  scientist (the Mac); in the service, agent pods can't run delete at all.
+- `docs/always-on.md` brought up to date: the service is running, with
+  what each phase still lacks.
+
 ## 2026-11-23 (cancel and move)
 
 - `program cancel <job> --reason ...` stops a job in flight (`scancel`,
