@@ -4,6 +4,13 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (dashboard: what changed)
+
+- The dashboard marks a line "new" when its state, latest summary, latest
+  review or notes changed since its page was last opened in that browser.
+  What was seen is kept in the browser (localStorage), so the page needs
+  no login and writes nothing to the service.
+
 ## 2026-11-23 (deleting on a cluster)
 
 - `program delete` of data on a cluster needs `--by human`. Sequel's

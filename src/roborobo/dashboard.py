@@ -24,6 +24,7 @@ rendered, JSON laid out, anything else as text.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import re
@@ -70,6 +71,8 @@ code { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 
 a { color: var(--accent); }
 .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .none { color: var(--muted); }
+.new { background: var(--accent); color: var(--surface); border-radius: 4px; padding: 0 5px;
+  font-size: .75rem; margin-left: 4px; }
 details summary { cursor: pointer; } details[open] summary { color: var(--muted); }
 .doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 4px 18px; overflow-x: auto; }
@@ -82,6 +85,33 @@ MAX_DOC_BYTES = 2_000_000
 
 def esc(text) -> str:
     return html.escape(str(text))
+
+
+def signature(line: dict, summary: str | None, review: str | None) -> str:
+    """Changes whenever a line has something new to read: its state, its
+    latest summary or review, or a note."""
+    seen = json.dumps([line.get("state"), line.get("status"), summary, review,
+                       len(line.get("notes", []))])
+    return hashlib.sha256(seen.encode()).hexdigest()[:16]
+
+
+# Marks lines changed since their page was last opened in this browser. What
+# was seen is kept in the browser only (localStorage); without it, nothing is
+# marked and the page reads the same.
+MARK_NEW = """<script>
+try {
+  document.querySelectorAll("tr[data-line]").forEach(function (row) {
+    if (localStorage.getItem("roborobo:" + row.dataset.line) !== row.dataset.sig) {
+      row.querySelector(".new").hidden = false;
+    }
+  });
+} catch (e) {}
+</script>"""
+
+
+def mark_seen(key: str, sig: str) -> str:
+    return ("<script>try { localStorage.setItem(" + json.dumps("roborobo:" + key) + ", "
+            + json.dumps(sig) + "); } catch (e) {}</script>")
 
 
 def page(title: str, body: str, refresh: bool = False) -> str:
@@ -333,13 +363,16 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         state = line.get("state", "")
         stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{esc(state)}"
                   "</details>" if len(state) > 160 else esc(state))
-        out.append(f"<tr><td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
-                   f"</b></a><br>{esc(line.get('name', ''))}</td>"
+        sig = signature(line, session[0] if session else None, review[0] if review else None)
+        out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'>"
+                   f"<td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
+                   f"</b></a><span class=new hidden>new</span><br>{esc(line.get('name', ''))}</td>"
                    f"<td>{stands}</td><td>{heard_text}</td>"
                    f"<td>{run_text}</td><td>{check}</td>"
                    f"<td>{'<br>'.join(flight) or '<span class=none>nothing</span>'}</td>"
                    f"<td><a href='{esc(link)}'>Discuss</a></td></tr>")
     out.append("</table>")
+    out.append(MARK_NEW)
     return "\n".join(out)
 
 
@@ -355,7 +388,9 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     latest = summaries[-1] if summaries else None
     stem = Path(latest[0]).stem if latest else None
     review = next((r for r in reversed(reviews) if Path(r[0]).stem == stem), None)
-    out = [f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
+    sig = signature(line, latest[0] if latest else None, reviews[-1][0] if reviews else None)
+    out = [mark_seen(f"{program.name}/{lid}", sig),
+           f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
            f"<h1>{esc(lid)} · {esc(line.get('name', ''))}</h1>",
            f"<p class=meta>{esc(line.get('status', ''))} · last heard "
            f"{esc(when(heard, program.timezone)) if heard else 'never'} · <a href='"
@@ -472,7 +507,9 @@ def write(state: Path, conn: sqlite3.Connection, programs: list[Program],
     text = page("RoboRobo service",
                 "<h1>RoboRobo service</h1>"
                 f"<p class=meta>Last look {datetime.now(ZoneInfo(programs[0].timezone) if programs else None):%b %-d, %H:%M %Z}. "
-                "This page refreshes every minute. A line's name opens its page; Discuss "
+                "This page refreshes every minute. A line's name opens its page, and "
+                "<span class=new>new</span> marks lines that changed since you last opened "
+                "theirs; Discuss "
                 "opens a Claude Code thread in your clone.</p>" + "\n".join(sections),
                 refresh=True)
     path = folder / "index.html"
