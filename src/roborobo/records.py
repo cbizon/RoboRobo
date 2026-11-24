@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from pathlib import Path
@@ -16,7 +17,7 @@ from referencing import Registry, Resource
 
 from roborobo import SCHEMAS
 from roborobo.config import LEDGER, Program
-from roborobo.gitutil import has_head, history, show
+from roborobo.gitutil import has_head, history, is_merge, show
 
 
 @cache
@@ -42,15 +43,26 @@ def schema_errors(document: object, schema: str) -> list[str]:
 
 def append_only(program: Program, rel: str) -> list[str]:
     """Each committed version of a ledger file, and the working copy, must
-    extend the one before it byte for byte."""
+    extend the one before it byte for byte. A merge is the exception: it
+    brings in another branch's records (a line taking in main, a line merged
+    into main), which git's union merge may place among this branch's, so a
+    merge must keep every earlier line, in any position."""
     if not has_head(program.repo):
         return []
-    versions = [(commit[:8], show(program.repo, commit, rel) or b"")
-                for commit in history(program.repo, rel)]
-    versions.append(("working tree", (program.repo / rel).read_bytes()))
-    return [f"{rel}: {name} rewrites earlier lines (the ledger is append-only)"
-            for (_, before), (name, after) in zip(versions, versions[1:])
-            if not after.startswith(before)]
+    commits = history(program.repo, rel)
+    versions = [(commit[:8], show(program.repo, commit, rel) or b"", is_merge(program.repo, commit))
+                for commit in commits]
+    versions.append(("working tree", (program.repo / rel).read_bytes(), False))
+    problems = []
+    for (_, before, _), (name, after, merge) in zip(versions, versions[1:]):
+        if merge:
+            lost = Counter(before.splitlines()) - Counter(after.splitlines())
+            if lost:
+                problems.append(f"{rel}: the merge {name} drops or changes {sum(lost.values())} "
+                                "earlier line(s) (the ledger is append-only)")
+        elif not after.startswith(before):
+            problems.append(f"{rel}: {name} rewrites earlier lines (the ledger is append-only)")
+    return problems
 
 
 def load_ledger(program: Program) -> tuple[dict[str, list[dict]], list[str]]:

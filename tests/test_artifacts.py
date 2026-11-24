@@ -264,3 +264,20 @@ def test_cancel_a_job_in_flight(program, slurm, tmp_path, capsys):  # noqa: F811
     assert "ended   hatteras 1001 E0001 CANCELLED" in out and "problem" not in out
     recorded = json.loads((program / "evidence" / "E0001" / "hatteras-1001.json").read_text())
     assert recorded["cancel_requested"]["reason"] == "wrong box size"
+
+
+def test_another_lines_run_folder_is_not_this_checkouts_problem(program):
+    """Nov 24, the first parallel runs: L0020 created runs/E0102 while L0019 ran,
+    and L0019's check failed on data whose registration it didn't have."""
+    make(data(program) / "runs" / "E0102" / "out.json")  # registered on another line's branch
+    problems, notes = artifact_check(program)
+    assert problems == []
+    assert notes == ["data of experiments registered on another line, not checked here: runs/E0102/"]
+    make(data(program) / "runs" / "E0001" / "out.json")  # this checkout's own experiment
+    problems, _ = artifact_check(program)
+    assert "unrecorded data: runs/E0001/" in problems[0] and "E0102" not in problems[0]
+
+
+def test_record_is_run_by_the_service_for_agent_pods():
+    from roborobo import service_api
+    assert "record" in service_api.FORWARDED and "delete" not in service_api.FORWARDED

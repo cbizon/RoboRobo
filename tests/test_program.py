@@ -275,6 +275,40 @@ def test_ledger_is_append_only(program, capsys):
     assert code == 1 and "rewrites earlier lines" in out
 
 
+def test_a_merge_may_place_another_branchs_records_among_ours(program, capsys):
+    """Nov 24: a line took in main, whose new records landed before the line's
+    own in the file, and the byte-for-byte rule called the merge a rewrite."""
+    from roborobo import config
+    from roborobo.records import append_only
+    run("approve", "--repo", program)
+    ledger = program / "ledger" / "blockers.jsonl"
+    ledger.write_text("a\n")
+    commit(program, "a")
+    git(program, "checkout", "-q", "-b", "line/L0001")
+    ledger.write_text("a\nours\n")
+    commit(program, "ours")
+    git(program, "checkout", "-q", "main")
+    ledger.write_text("a\ntheirs\n")
+    commit(program, "theirs")
+    git(program, "checkout", "-q", "line/L0001")
+    subprocess.run(["git", "-C", str(program), "merge", "-q", "--no-commit", "main"],
+                   capture_output=True)
+    ledger.write_text("a\ntheirs\nours\n")  # main's record first: not an extension of ours
+    commit(program, "merge main")
+    prog = config.load(program)
+    assert append_only(prog, "ledger/blockers.jsonl") == []
+    git(program, "checkout", "-q", "main")
+    ledger.write_text("a\ntheirs\nmore\n")
+    commit(program, "more on main")
+    git(program, "checkout", "-q", "line/L0001")
+    subprocess.run(["git", "-C", str(program), "merge", "-q", "--no-commit", "main"],
+                   capture_output=True)
+    ledger.write_text("a\ntheirs\nmore\n")  # this merge loses "ours"
+    commit(program, "a merge that drops a record")
+    (problem,) = append_only(prog, "ledger/blockers.jsonl")
+    assert "drops or changes 1 earlier line(s)" in problem
+
+
 def test_budget_over_limit_fails(program, capsys):
     (program / "budgets.yaml").write_text(
         "budgets:\n  cpu_hours:\n    - {max: 1, per: program, where: [local]}\n")

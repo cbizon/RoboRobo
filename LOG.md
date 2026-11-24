@@ -4,6 +4,21 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-24 (the first parallel runs)
+
+- Three lines ran at once for the first time and all three were paused by
+  checks that assumed one line at a time.
+- The data folder is shared, so one line's new run folder failed another
+  line's check before its record had been merged. A run folder of an
+  experiment a checkout hasn't registered is now noted, not a problem: the
+  line that registered it answers for it in its own check.
+- The append-only rule compared files byte for byte, but when a line takes
+  in main, git's union merge can put main's records among the line's. A
+  merge commit must now keep every earlier line, in any position; ordinary
+  commits must still extend the file exactly.
+- `program record` is forwarded from agent pods to the service, so the
+  artifact ids of lines running at once come from one place.
+
 ## 2026-11-24 (Start, and a state for every line)
 
 - Chris: answering on the dashboard started a run at once, while a Discuss

@@ -261,6 +261,15 @@ def recorded_elsewhere(program: Program) -> set[str]:
     return paths
 
 
+RUN_FOLDER = re.compile(r"runs/(E\d{4})/")
+
+
+def registered_experiments(program: Program) -> set[str]:
+    path = program.repo / "ledger" / "experiments.jsonl"
+    return {json.loads(row).get("experiment_id") for row in path.read_text().splitlines()
+            if row.strip()}
+
+
 def unrecorded(program: Program, artifacts: dict[str, dict] | None = None) -> list[str]:
     """Paths in the data folder that are not data, scratch, code or
     operational state: the folders and files no artifact covers. Doesn't
@@ -346,6 +355,16 @@ def check(program: Program, records: list[dict]) -> tuple[list[str], list[str]]:
                          f"({artifact['files']} files, {artifact['bytes']} bytes; now {files}, "
                          f"{size}); run `program record` on it when it is finished")
     missing = unrecorded(program, current)
+    # Lines share the data folder. A run folder of an experiment this checkout
+    # hasn't registered belongs to a line whose records aren't here yet (it is
+    # running, or not merged): that line's own check answers for it.
+    known = registered_experiments(program)
+    others = [path for path in missing
+              if (found := RUN_FOLDER.fullmatch(path)) and found[1] not in known]
+    if others:
+        notes.append("data of experiments registered on another line, not checked here: "
+                     + ", ".join(others[:8]))
+    missing = [path for path in missing if path not in others]
     if missing:
         shown = ", ".join(missing[:8]) + (f" and {len(missing) - 8} more" if len(missing) > 8 else "")
         problems.append(f"the data folder has unrecorded data: {shown}. Record data with "
