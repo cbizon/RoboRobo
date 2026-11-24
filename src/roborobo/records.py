@@ -265,10 +265,13 @@ def next_id(program: Program, letter: str) -> str:
     raise ValueError(f"no ledger uses ids starting with {letter!r}; use one of E, C, D, B, L, T, A")
 
 
+RESERVE_TIMEOUT = 60  # seconds to wait for the database
+
+
 def reserve(database: Path, program: str, letter: str, at_least: int) -> int:
     """Hand out the next id number for a program and letter, never one handed
     out before, and never below ``at_least``."""
-    conn = sqlite3.connect(database, timeout=60, isolation_level=None)
+    conn = sqlite3.connect(database, timeout=RESERVE_TIMEOUT, isolation_level=None)
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS ids (program TEXT, letter TEXT, last INTEGER, "
                      "PRIMARY KEY (program, letter))")

@@ -4,6 +4,15 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (the service locked its own database)
+
+- The service crashed with "database is locked" whenever a cluster job
+  ended in a look that had also added an event: recording the job takes a
+  ledger id from the service's database on a second connection, while the
+  first still held the uncommitted event. It now commits before recording
+  jobs. Unseen until the first job ended after ids moved to the database
+  (Nov 23), then a crash loop.
+
 ## 2026-11-23 (acting from the dashboard)
 
 - With a dashboard token (`ROBOROBO_DASHBOARD_TOKEN`, a Kubernetes secret

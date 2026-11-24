@@ -292,6 +292,10 @@ def collect(conn, program: Program, day: date) -> list[str]:
     for line, review in challenged_lines(program).items():
         add_event(conn, program, line, "challenge", f"challenge:{review}",
                   f"open challenges in {review}", status(line, committed_at(program.repo, review)))
+    # Recording an ended job takes a ledger id from this same database on a
+    # connection of its own (records.reserve), so nothing may be left uncommitted
+    # here, or the two wait on each other until "database is locked".
+    conn.commit()
     jobs, problems = job_events(program)
     for line, key, detail, ended in jobs:
         add_event(conn, program, line, "job", key, detail, status(line, ended))

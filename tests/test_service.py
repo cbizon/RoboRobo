@@ -274,6 +274,34 @@ def test_a_conflicting_push_pauses_the_program(served, tmp_path):
     assert service.uncommitted(config.load(served)) == []  # the merge was aborted
 
 
+def test_an_ended_job_gets_its_id_from_the_services_database(served, tmp_path, slurm,  # noqa: F811
+                                                            monkeypatch):
+    """Nov 24: the service crashed with "database is locked" when a job ended in
+    the same look as a new instruction: the id came from a second connection
+    while the first had the new event uncommitted."""
+    with (served / "program.toml").open("a") as f:
+        f.write(f'\n[hosts.hatteras]\nkind = "slurm"\nssh = "ht1"\n'
+                f'workdir = "{tmp_path / "cluster"}"\nslots = 4\n')
+    append(served, "experiments.jsonl", {
+        "record": "registration", "experiment_id": "E0001", "at": "2026-11-18T12:00:00+00:00",
+        "by": "agent", "rq_id": "RQ1", "line_id": "L0001", "host": "hatteras",
+        "hypothesis": "The heater causes the drift.", "method": "On hatteras, many seeds.",
+        "judged_by": "The drift check on the heater runs.",
+        "falsified_if": "No drift with the heater on.", "cost_estimate": {"cpu_hours": 1}})
+    commit(served, "a host and an experiment")
+    assert run("approve", "--repo", served) == 0
+    db = conn(tmp_path)
+    look(served, db)
+    monkeypatch.setenv("ROBOROBO_IDS", str(tmp_path / "state" / "service.db"))  # as serve sets it
+    monkeypatch.setattr("roborobo.records.RESERVE_TIMEOUT", 3)
+    assert run("submit", "--repo", served, "--host", "hatteras", "--experiment", "E0001",
+               "--", "true") == 0
+    instruct(served, "## L0003 Fan\n\n1. Does the fan matter?\n")  # a new event, same look
+    look(served, db)  # no "database is locked"
+    look(served, db)  # one line per look by default
+    assert sorted(r["line"] for r in runs(db)) == ["L0001", "L0003"]
+
+
 def test_an_ended_job_starts_its_lines_run(served, tmp_path, slurm):  # noqa: F811
     with (served / "program.toml").open("a") as f:
         f.write(f'\n[hosts.hatteras]\nkind = "slurm"\nssh = "ht1"\n'
