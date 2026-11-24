@@ -438,7 +438,9 @@ def prompts(program: Program, line: str, stem: str, events: list,
     worker = [f"Run line {line} of the {program.name} research program. {where(program, tree)}. "
               f"Read scheduled/line.md and follow it. The always-on service "
               f"started this run, so write your summary to sessions/{stem}.json. What started "
-              "it: " + "; ".join(reasons) + ". To be started again at a time you choose "
+              "it: " + "; ".join(reasons) + ". Other lines may be running at the same "
+              "time: in PROGRAM.md only add a section for this run, and don't rewrite text "
+              "another line wrote. To be started again at a time you choose "
               "(to collect a job, say), run `program wake --line " + line + " --in-minutes N "
               "--reason ...`."]
     if instruction and instruction.startswith("lines/"):

@@ -4,6 +4,16 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-24 (PROGRAM.md when lines run together)
+
+- `PROGRAM.md` merges with git's union driver, like the ledger: every line
+  adds a section under "Current state", so two lines running at once
+  always collided there and one was paused. The service's prompt asks a
+  run to add its own section and not rewrite another line's text.
+- L0020's Nov 24 run had recorded its data folder as A0172 in its own pod
+  while the service gave A0172 to a job; it was merged by hand as A0174.
+  `program record` has taken its ids from the service since #34.
+
 ## 2026-11-24 (the first parallel runs)
 
 - Three lines ran at once for the first time and all three were paused by
