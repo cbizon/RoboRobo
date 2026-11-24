@@ -9,22 +9,33 @@ Top of the page, per program, **needs you**: the program paused (and the
 command to resume it), lines the agent proposed, questions from the latest
 run of each line, open challenges, failed or vanished jobs, and lines held
 back by the service's limits. Then **lines**: one row per active line with
-where it stands, its last run, the checker's verdicts on it, jobs in flight
-and pending events, and a Discuss link that opens a Claude Code thread on
-that line in the scientist's clone.
+where it stands (in full, folded), when it was last heard from, its last
+run, the checker's verdicts, jobs in flight and pending events, and a
+Discuss link that opens a Claude Code thread on that line in the
+scientist's clone.
+
+Each line also gets a page (``<program>/lines/<line>.html``): its question,
+where it stands, its progress notes, the latest run's answers and questions,
+the checker's review, recent runs and notes, and its documents. Every
+document a line keeps (files in ``lines/<line>/`` and files its records
+point to) gets a page of its own (``<program>/docs/<path>.html``): Markdown
+rendered, JSON laid out, anything else as text.
 """
 
 from __future__ import annotations
 
 import html
 import json
+import re
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
+
+import markdown
 
 from roborobo import cluster, mapview
 from roborobo.config import Program
@@ -58,12 +69,110 @@ code { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 
 a { color: var(--accent); }
 .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .none { color: var(--muted); }
-@media (max-width: 700px) { td:nth-child(3), th:nth-child(3) { display: none; } }
+details summary { cursor: pointer; } details[open] summary { color: var(--muted); }
+.doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 18px; overflow-x: auto; }
+.doc table { width: auto; } pre { white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 700px) { td:nth-child(4), th:nth-child(4) { display: none; } }
 """
+QUIET_DAYS = 3        # an active line not heard from in longer is marked
+MAX_DOC_BYTES = 2_000_000
 
 
 def esc(text) -> str:
     return html.escape(str(text))
+
+
+def page(title: str, body: str, refresh: bool = False) -> str:
+    return ("<!doctype html><html lang=en><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width, initial-scale=1'>"
+            + ("<meta http-equiv=refresh content=60>" if refresh else "")
+            + f"<title>{esc(title)}</title><style>{STYLE}</style></head><body>{body}</body></html>")
+
+
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def separate_lists(text: str) -> str:
+    """A blank line before a list that follows a paragraph line. Most Markdown
+    (and the agent's) starts a list without one; Python-Markdown needs it."""
+    out, fenced, previous = [], False, ""
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif (not fenced and LIST_ITEM.match(line) and previous.strip()
+              and not LIST_ITEM.match(previous) and not previous.startswith((" ", "\t"))):
+            out.append("")
+        out.append(line)
+        previous = line
+    return "\n".join(out)
+
+
+def render_markdown(text: str) -> str:
+    """Markdown as HTML, with any raw HTML in it shown as text, not run."""
+    text = separate_lists(text)
+    md = markdown.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
+    md.preprocessors.deregister("html_block")
+    md.inlinePatterns.deregister("html")
+    return md.convert(text)
+
+
+def render_file(path: Path) -> str:
+    """A document's contents as HTML: Markdown rendered, JSON laid out, other
+    text as is."""
+    if path.stat().st_size > MAX_DOC_BYTES:
+        return f"<p class=none>{path.stat().st_size // 1_000_000} MB: too big to show here.</p>"
+    raw = path.read_bytes()
+    try:
+        text = raw.decode()
+    except UnicodeDecodeError:
+        return "<p class=none>Not a text file.</p>"
+    if path.suffix == ".md":
+        return render_markdown(text)
+    if path.suffix == ".json":
+        try:
+            text = json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+        except ValueError:
+            pass
+    return f"<pre>{esc(text)}</pre>"
+
+
+def line_documents(program: Program, lid: str, line: dict) -> list[tuple[str, str]]:
+    """(path, kind) for every file the line keeps or its records point to.
+    Code branches and other things that aren't files come back with kind and
+    no page."""
+    found: dict[str, str] = {}
+    folder = program.repo / "lines" / lid
+    if folder.is_dir():
+        for path in sorted(folder.rglob("*")):
+            if path.is_file():
+                found[path.relative_to(program.repo).as_posix()] = (
+                    "progress" if path.name == "progress.md" else "document")
+    for kind, rel in line.get("arts", []):
+        found.setdefault(rel, kind)
+    return list(found.items())
+
+
+def is_repo_file(program: Program, rel: str) -> bool:
+    path = (program.repo / rel).resolve()
+    return path.is_relative_to(program.repo.resolve()) and path.is_file()
+
+
+def when(epoch: float) -> str:
+    moment = datetime.fromtimestamp(epoch, timezone.utc).astimezone()
+    days = (datetime.now(timezone.utc) - moment).days
+    ago = "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago"
+    return f"{moment:%b %-d} ({ago})"
+
+
+def last_heard(program: Program, lid: str, line: dict, summaries: list[tuple[str, dict]],
+               runs: list) -> float:
+    """When the line last said anything: its newest summary, note or service run."""
+    moments = [committed_at(program.repo, rel) for rel, _ in summaries[-1:]]
+    moments += [datetime.fromisoformat(n["at"]).timestamp() for n in line.get("notes", [])[-1:]]
+    moments += [datetime.fromisoformat(r["started"]).timestamp() for r in runs
+                if r["line"] == lid][:1]
+    return max(moments, default=0)
 
 
 def discuss_link(program: Program, lid: str, name: str, latest: str | None,
@@ -82,18 +191,25 @@ def discuss_link(program: Program, lid: str, name: str, latest: str | None,
     return (f"claude://code/new?folder={quote(str(program.repo))}&q={quote(prompt)}")
 
 
-def latest_documents(program: Program) -> tuple[dict, dict]:
-    """The newest session summary and review per line, by file name."""
-    newest = {}
+def line_documents_by_kind(program: Program) -> tuple[dict, dict]:
+    """Every session summary and review per line, oldest first by file name."""
+    out = {}
     for folder, schema in (("sessions", "session-summary.schema.json"),
                            ("reviews", "review.schema.json")):
         found, _ = documents(program, folder, schema)
-        by_line: dict[str, tuple[str, dict]] = {}
+        by_line: dict[str, list[tuple[str, dict]]] = {}
         for rel, doc in sorted(found, key=lambda item: run_order(item[0])):
             if doc.get("line_id"):
-                by_line[doc["line_id"]] = (rel, doc)
-        newest[folder] = by_line
-    return newest["sessions"], newest["reviews"]
+                by_line.setdefault(doc["line_id"], []).append((rel, doc))
+        out[folder] = by_line
+    return out["sessions"], out["reviews"]
+
+
+def latest_documents(program: Program) -> tuple[dict, dict]:
+    """The newest session summary and review per line, by file name."""
+    sessions, reviews = line_documents_by_kind(program)
+    return ({lid: docs[-1] for lid, docs in sessions.items()},
+            {lid: docs[-1] for lid, docs in reviews.items()})
 
 
 def run_order(rel: str) -> tuple[str, int]:
@@ -114,6 +230,7 @@ def answered_after(program: Program) -> int:
 def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]) -> str:
     records, _ = load_ledger(program)
     lines = fold_lines(records.get("lines.jsonl", []))
+    all_sessions, _ = line_documents_by_kind(program)
     sessions, reviews = latest_documents(program)
     open_jobs = [j for j in cluster.load_jobs(program) if not j.get("ended_at")]
     paused = conn.execute("SELECT at, reason FROM paused WHERE program = ?",
@@ -165,7 +282,8 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
     out += [f"<div class='card {kind}'>{text}</div>" for kind, text in needs] or [
         "<div class=card style='border-left-color:var(--good)'>Nothing.</div>"]
     out.append("</div><h3>Lines</h3><table><tr><th>Line</th><th>Where it stands</th>"
-               "<th>Last run</th><th>Checker</th><th>In flight</th><th></th></tr>")
+               "<th>Last heard</th><th>Last run</th><th>Checker</th><th>In flight</th>"
+               "<th></th></tr>")
     for lid, line in sorted(lines.items()):
         if line.get("status") != "active":
             continue
@@ -200,13 +318,133 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         flight += [f"waiting: {esc(e['detail'])}" for e in events]
         reviewed = bool(review) and Path(review[0]).stem == stem
         link = discuss_link(program, lid, line.get("name", lid), stem, reviewed)
-        out.append(f"<tr><td><b>{esc(lid)}</b><br>{esc(line.get('name', ''))}</td>"
-                   f"<td>{esc(mapview.short(line.get('state', ''), 220))}</td>"
+        heard = last_heard(program, lid, line, all_sessions.get(lid, []), runs)
+        quiet = heard and (datetime.now(timezone.utc).timestamp() - heard) > QUIET_DAYS * 86400
+        heard_text = (f"<span class={'warn' if quiet else 'meta'}>{esc(when(heard))}</span>"
+                      if heard else "<span class=none>never</span>")
+        state = line.get("state", "")
+        stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{esc(state)}"
+                  "</details>" if len(state) > 160 else esc(state))
+        out.append(f"<tr><td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
+                   f"</b></a><br>{esc(line.get('name', ''))}</td>"
+                   f"<td>{stands}</td><td>{heard_text}</td>"
                    f"<td>{run_text}</td><td>{check}</td>"
                    f"<td>{'<br>'.join(flight) or '<span class=none>nothing</span>'}</td>"
                    f"<td><a href='{esc(link)}'>Discuss</a></td></tr>")
     out.append("</table>")
     return "\n".join(out)
+
+
+def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
+              summaries: list[tuple[str, dict]], reviews: list[tuple[str, dict]],
+              notes: list[str]) -> str:
+    """Everything about one line on one page."""
+    runs = conn.execute("SELECT * FROM runs WHERE program = ? AND line = ? ORDER BY id DESC",
+                        (program.name, lid)).fetchall()
+    open_jobs = [j for j in cluster.load_jobs(program)
+                 if not j.get("ended_at") and j.get("line_id") == lid]
+    heard = last_heard(program, lid, line, summaries, runs)
+    latest = summaries[-1] if summaries else None
+    stem = Path(latest[0]).stem if latest else None
+    review = next((r for r in reversed(reviews) if Path(r[0]).stem == stem), None)
+    out = [f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
+           f"<h1>{esc(lid)} · {esc(line.get('name', ''))}</h1>",
+           f"<p class=meta>{esc(line.get('status', ''))} · last heard "
+           f"{esc(when(heard)) if heard else 'never'} · <a href='"
+           f"{esc(discuss_link(program, lid, line.get('name', lid), stem, bool(review)))}'>"
+           "Discuss</a></p>"]
+    if line.get("question"):
+        source = f" <span class=meta>({esc(line['question_source'])})</span>" \
+            if line.get("question_source") else ""
+        out += ["<h3>Question</h3>", f"<p>{esc(line['question'])}{source}</p>"]
+    out += ["<h3>Where it stands</h3>", f"<p>{esc(line.get('state', '')) or '<span class=none>not recorded</span>'}</p>"]
+    progress = program.repo / "lines" / lid / "progress.md"
+    if progress.is_file():
+        out += ["<h3>Progress notes</h3>", f"<div class=doc>{render_file(progress)}</div>"]
+    if open_jobs:
+        out += ["<h3>Jobs in flight</h3><ul>"] + [
+            f"<li>{esc(j['experiment_id'])}: job {esc(j['job_id'])} on {esc(j['host'])}, "
+            f"{esc(j.get('state', ''))} {esc(j.get('elapsed', ''))}</li>" for j in open_jobs] + ["</ul>"]
+    if latest:
+        rel, doc = latest
+        out += [f"<h3>Latest run</h3><p><b>{esc(doc.get('headline', ''))}</b> "
+                f"<span class=meta>({esc(rel)})</span></p>"]
+        for answer in doc.get("answers", []):
+            out.append(f"<div class=card><b>Asked:</b> {esc(answer['asked'])}<br>"
+                       f"<b>{esc(answer['status'])}:</b> {esc(answer['answer'])}</div>")
+        for question in doc.get("questions", []):
+            out.append(f"<div class=card><b>Question:</b> {esc(question['question'])}<br>"
+                       f"<span class=meta>Why it matters: {esc(question['why_it_matters'])}. "
+                       f"If unanswered: {esc(question['default_if_unanswered'])}</span></div>")
+    if review:
+        rel, doc = review
+        out += [f"<h3>The checker</h3><p>{esc(doc.get('summary', ''))} "
+                f"<span class=meta>({esc(rel)})</span></p>"]
+        for item in doc.get("reviews", []):
+            kind = "good" if item["verdict"] == "holds" else "bad"
+            out.append(f"<div class=card><span class={kind}><b>{esc(item['verdict'])}</b></span>: "
+                       f"{esc(item.get('plain_claim', ''))}<br><span class=meta>"
+                       f"{esc(item.get('what_would_resolve', ''))}</span></div>")
+    docs = line_documents(program, lid, line)
+    out.append("<h3>Documents</h3>")
+    if docs:
+        out.append("<ul>")
+        for rel, kind in docs:
+            if is_repo_file(program, rel):
+                out.append(f"<li><a href='../docs/{esc(rel)}.html'>{esc(rel)}</a> "
+                           f"<span class=meta>{esc(kind)}</span></li>")
+            else:
+                out.append(f"<li><code>{esc(rel)}</code> <span class=meta>{esc(kind)}</span></li>")
+        out.append("</ul>")
+    else:
+        out.append("<p class=none>None yet.</p>")
+    out.append("<h3>Recent runs</h3><table><tr><th>Run</th><th>Headline</th></tr>")
+    out += [f"<tr><td>{esc(Path(rel).stem)}</td><td>{esc(doc.get('headline', ''))}</td></tr>"
+            for rel, doc in reversed(summaries[-10:])] or [
+        "<tr><td colspan=2 class=none>none yet</td></tr>"]
+    out.append("</table>")
+    failed = [r for r in runs[:10] if json.loads(r["problems"] or "[]")]
+    if failed:
+        out.append("<h3>Service runs with problems</h3><ul>")
+        out += [f"<li>{esc(r['stem'])}: {esc('; '.join(json.loads(r['problems'])))}</li>"
+                for r in failed]
+        out.append("</ul>")
+    if line.get("notes"):
+        out.append("<h3>Notes</h3>")
+        out += [f"<div class=card><span class=meta>{esc(n.get('night', n['at'][:10]))}, "
+                f"{esc(n['by'])}</span><br>{esc(n.get('text', ''))}</div>"
+                for n in reversed(line["notes"][-8:])]
+    return page(f"{lid} · {line.get('name', '')}", "\n".join(out))
+
+
+def doc_page(program: Program, rel: str, lines_using: list[str]) -> str:
+    back = " · ".join(f"<a href='../{'../' * rel.count('/')}lines/{esc(lid)}.html'>{esc(lid)}</a>"
+                      for lid in lines_using)
+    body = (f"<p class=meta>{back}</p><h1>{esc(rel)}</h1>"
+            f"<div class=doc>{render_file(program.repo / rel)}</div>")
+    return page(rel, body)
+
+
+def write_program_pages(folder: Path, conn: sqlite3.Connection, program: Program,
+                        notes: list[str]) -> None:
+    """A page per line, and a page per document lines keep."""
+    records, _ = load_ledger(program)
+    lines = fold_lines(records.get("lines.jsonl", []))
+    sessions, reviews = line_documents_by_kind(program)
+    base = folder / program.name
+    used: dict[str, list[str]] = {}
+    for lid, line in lines.items():
+        target = base / "lines" / f"{lid}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(line_page(conn, program, lid, line, sessions.get(lid, []),
+                                    reviews.get(lid, []), notes))
+        for rel, _ in line_documents(program, lid, line):
+            if is_repo_file(program, rel):
+                used.setdefault(rel, []).append(lid)
+    for rel, lids in used.items():
+        target = base / "docs" / f"{rel}.html"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(doc_page(program, rel, sorted(set(lids))))
 
 
 def write(state: Path, conn: sqlite3.Connection, programs: list[Program],
@@ -217,20 +455,20 @@ def write(state: Path, conn: sqlite3.Connection, programs: list[Program],
     sections = []
     for program in programs:
         mapview.write(program, folder / program.name / "map.html", 14)
+        write_program_pages(folder, conn, program, looks.get(program.name, []))
         sections.append(program_section(conn, program, looks.get(program.name, [])))
     for name, lines in errors.items():
         sections.append(f"<h2>{esc(name)}</h2><div class=needs><div class='card bad'>"
                         f"<b>The last look failed</b> (tried again at the next):"
                         f"<pre>{esc(chr(10).join(lines))}</pre></div></div>")
-    page = ("<!doctype html><html lang=en><head><meta charset=utf-8>"
-            "<meta name=viewport content='width=device-width, initial-scale=1'>"
-            "<meta http-equiv=refresh content=60><title>RoboRobo service</title>"
-            f"<style>{STYLE}</style></head><body><h1>RoboRobo service</h1>"
-            f"<p class=meta>Last look {datetime.now().astimezone():%b %-d, %H:%M %Z}. "
-            "This page refreshes every minute. Discuss opens a Claude Code thread in your "
-            "clone.</p>" + "\n".join(sections) + "</body></html>")
+    text = page("RoboRobo service",
+                "<h1>RoboRobo service</h1>"
+                f"<p class=meta>Last look {datetime.now().astimezone():%b %-d, %H:%M %Z}. "
+                "This page refreshes every minute. A line's name opens its page; Discuss "
+                "opens a Claude Code thread in your clone.</p>" + "\n".join(sections),
+                refresh=True)
     path = folder / "index.html"
-    path.write_text(page)
+    path.write_text(text)
     return path
 
 
