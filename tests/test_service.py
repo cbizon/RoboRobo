@@ -314,8 +314,8 @@ def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
     look(served, db)
     page = dashboard_page(served, tmp_path, db)
     assert "<b>L0002 proposed</b> by the agent: Spare heater. One is one sample." in page
-    assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><br>Heater" in page
-    assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><br>Fan" in page
+    assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><span class=new hidden>new</span><br>Heater" in page
+    assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><span class=new hidden>new</span><br>Fan" in page
     assert "lines/L0002.html'><b>" not in page  # only active lines get a row
     assert f"{day}-L0001" in page and "A quiet run." in page and "no claims" in page
     link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", page).group(1))
@@ -560,3 +560,17 @@ def test_commands_are_forwarded_only_inside_a_run(served, monkeypatch, capsys):
     monkeypatch.delenv("ROBOROBO_RUN_TOKEN", raising=False)
     assert run("next-id", "E", "--repo", served) == 0  # ran here, not forwarded
     assert capsys.readouterr().out.strip() == "E0001"
+
+
+def test_lines_changed_since_their_page_was_opened_are_marked(served, tmp_path):
+    import re
+    db = conn(tmp_path)
+    index = dashboard_page(served, tmp_path, db)
+    row_sig = re.search(r"<tr data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", index).group(1)
+    assert "<span class=new hidden>new</span>" in index and "localStorage.getItem" in index
+    line_page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
+    assert f'localStorage.setItem("roborobo:demo/L0001", "{row_sig}")' in line_page  # opening it marks it seen
+    append(served, "lines.jsonl", line("L0001", "update", state="The heater is ruled out now."))
+    commit(served, "news")
+    changed = dashboard_page(served, tmp_path, db)
+    assert re.search(r"<tr data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", changed).group(1) != row_sig
