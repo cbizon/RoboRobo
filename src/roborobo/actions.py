@@ -8,7 +8,8 @@ there are no actions and the page is read-only.
 Actions, each a commit on the program's main branch made under the
 repository lock, then pushed:
 
-- ``line-status``: make a line the agent proposed ``active``, or drop it;
+- ``line-status``: make a line the agent proposed ``active`` or drop it;
+  pause, close or reopen a line, with a comment kept as a note saying why;
 - ``instruct``: add to a line's own instruction
   (``lines/<line>/instruction.md``), which starts the line; answering one of
   a run's questions is an instruction that quotes the question;
@@ -25,6 +26,7 @@ import hmac
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -37,6 +39,10 @@ from roborobo.records import schema_errors
 
 LINE = re.compile(r"L\d{4}")
 MAX_TEXT = 8000
+
+
+# Set by an action so the service looks now instead of at its next poll.
+WAKE = threading.Event()
 
 
 class Refused(Exception):
@@ -83,24 +89,43 @@ def commit(program: Program, paths: list[str], message: str) -> None:
         raise Refused(f"recorded, but not pushed: {problem}")
 
 
-def line_status(program: Program, lid: str, status: str) -> str:
-    if status not in ("active", "dropped"):
-        raise Refused("a proposed line can be made active or dropped")
+# What the scientist may make of a line, from each status.
+MOVES = {"proposed": {"active", "dropped"}, "active": {"paused", "closed"},
+         "paused": {"active", "closed"}, "closed": {"active"}, "dropped": {"active"}}
+DONE = {"active": "made active", "dropped": "dropped", "paused": "paused", "closed": "closed"}
+
+
+def line_status(program: Program, lid: str, status: str, comment: str = "") -> str:
+    """Change a line's status: approve or drop a proposed line, pause, close or
+    reopen one. Closing, pausing and dropping take a comment, kept as the
+    scientist's note on the line, so the record says why."""
     line = line_of(program, lid)
-    if line.get("status") != "proposed":
-        raise Refused(f"{lid} is {line.get('status')}, not proposed")
+    now_is = line.get("status", "active")
+    if status not in MOVES.get(now_is, set()):
+        can = " or ".join(sorted(MOVES.get(now_is, set()))) or "nothing"
+        raise Refused(f"{lid} is {now_is}; from there it can be made {can}")
+    comment = (comment or "").strip()
+    if status in ("closed", "paused", "dropped") and now_is != "proposed" and not comment:
+        raise Refused("say why, so the record has it")
+    if len(comment) > MAX_TEXT:
+        raise Refused(f"that is over {MAX_TEXT} characters")
     at = now(program)
-    record = {"record": "update", "line_id": lid, "at": at.isoformat(), "by": "human",
-              "night": at.date().isoformat(), "status": status}
-    errors = schema_errors(record, "line.schema.json")
-    if errors:
-        raise RuntimeError(f"line record doesn't validate: {'; '.join(errors)}")
+    base = {"line_id": lid, "at": at.isoformat(), "by": "human", "night": at.date().isoformat()}
+    records = [{"record": "update", **base, "status": status}]
+    if comment:
+        records.append({"record": "note", **base,
+                        "text": f"{DONE[status].capitalize()} by {program.scientist}: {comment}"})
+    for record in records:
+        errors = schema_errors(record, "line.schema.json")
+        if errors:
+            raise Refused("that doesn't fit a line record: " + "; ".join(errors))
     with (program.repo / "ledger" / "lines.jsonl").open("a") as ledger:
-        ledger.write(json.dumps(record) + "\n")
-    done = "made active" if status == "active" else "dropped"
+        for record in records:
+            ledger.write(json.dumps(record) + "\n")
     commit(program, ["ledger/lines.jsonl"],
-           f"{lid} {done} by {program.scientist}, from the dashboard")
-    return f"{lid} is {done}."
+           f"{lid} {DONE[status]} by {program.scientist}, from the dashboard")
+    return f"{lid} is {DONE[status]}." + (" Your comment is saved as a note on the line."
+                                           if comment else "")
 
 
 def instruct(program: Program, lid: str, text: str, question: str = "") -> str:
@@ -124,7 +149,8 @@ def instruct(program: Program, lid: str, text: str, question: str = "") -> str:
     rel = path.relative_to(program.repo).as_posix()
     what = "answered a question of" if question.strip() else "instructed"
     commit(program, [rel], f"{program.scientist} {what} {lid}, from the dashboard")
-    return f"Added to {rel}. {lid} starts at the service's next look, within its limits."
+    return (f"Your instruction for {lid} is recorded. The line starts within a minute, unless "
+            "it is waiting on a limit; its row shows where it is.")
 
 
 def resume(state: Path, program: Program, lid: str = "") -> str:
@@ -138,7 +164,7 @@ def resume(state: Path, program: Program, lid: str = "") -> str:
             raise Refused(f"{name} isn't paused")
     finally:
         conn.close()
-    return f"{name} will run again at the service's next look."
+    return f"{name} is resumed and will run again within a minute."
 
 
 def perform(state: Path, repos: list[Path], form: dict[str, str]) -> str:
@@ -152,10 +178,14 @@ def perform(state: Path, repos: list[Path], form: dict[str, str]) -> str:
     action = form.get("action")
     with lines.MERGE_LOCK:  # the service's own commits, merges and pushes wait, and so do we
         if action == "line-status":
-            return line_status(program, form.get("line", ""), form.get("status", ""))
-        if action == "instruct":
-            return instruct(program, form.get("line", ""), form.get("text", ""),
+            said = line_status(program, form.get("line", ""), form.get("status", ""),
+                               form.get("comment", ""))
+        elif action == "instruct":
+            said = instruct(program, form.get("line", ""), form.get("text", ""),
                             form.get("question", ""))
-        if action == "resume":
-            return resume(state, program, form.get("line", ""))
-    raise Refused(f"{action!r} isn't something this page can do")
+        elif action == "resume":
+            said = resume(state, program, form.get("line", ""))
+        else:
+            raise Refused(f"{action!r} isn't something this page can do")
+    WAKE.set()
+    return said

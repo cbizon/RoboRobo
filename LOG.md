@@ -4,6 +4,21 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (dashboard: feedback, closing lines, all lines)
+
+- Chris instructed a line from the dashboard and saw nothing change. Now
+  an action redraws the pages at once and sends the browser back to where
+  the form was, with a banner saying what was done; it also wakes the
+  service, which looks immediately instead of at its next poll.
+- A line's row and page show the scientist's latest instruction and what
+  has happened to it: recorded, waiting to start, being worked on by a
+  run, or answered by one.
+- A line's page can close, pause or reopen the line. Closing and pausing
+  need a comment, saved as the scientist's note on the line, so the
+  record says why.
+- The lines table has every line; paused, closed, dropped and proposed
+  ones are hidden behind a toggle the browser remembers.
+
 ## 2026-11-23 (dashboard: terms, links, what's next)
 
 - Chris, reading the dashboard: the language is dense ("what's an
