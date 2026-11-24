@@ -30,7 +30,8 @@ from pathlib import Path
 # check only reads, but it fetches approval tags from the remote, which an
 # agent pod can't reach.
 # next-id: ids come from the service, so lines running at once never collide.
-FORWARDED = {"submit", "jobs", "fetch", "check", "next-id"}
+# wake: a line's timers live in the service's database.
+FORWARDED = {"submit", "jobs", "fetch", "check", "next-id", "wake"}
 TIMEOUT_SECONDS = 30 * 60
 
 

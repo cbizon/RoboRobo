@@ -4,6 +4,38 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (the service looks after itself)
+
+- A run stopped by the Claude usage limit no longer counts as done: its
+  events go back to pending and the program holds until the reset time in
+  the message (an hour if it gives none), shown as "waiting for the Claude
+  usage limit". On Nov 23 two lines hit the limit and had to be requeued
+  by hand.
+- Runs that end without a summary don't use up a line's runs for the day.
+  They have their own cap (`max_failed_runs_per_line_per_day`, 2), so a
+  broken setup can't loop. Six setup failures on Nov 23 used up two lines'
+  days.
+- The service keeps RoboRobo's rendered files current itself: each look it
+  re-renders template-owned files that differ, commits and pushes them.
+  They are RoboRobo's files; the scientist's are never touched. Every
+  RoboRobo change that touched the template had needed a `program sync`
+  by hand, or the next check failed.
+- With `ROBOROBO_SELF_UPDATE` set, the service exits between looks when
+  RoboRobo's branch has new commits; the pod restarts and its entrypoint
+  updates. Merging a RoboRobo PR is now the whole deployment, unless the
+  image changes.
+- `program wake --line L --in-minutes N --reason ...` lets a line set a
+  timer to be started again (forwarded to the service from agent pods): at
+  most three waiting per line, ten minutes to seven days ahead.
+- A line can have its own instruction, `lines/<line>/instruction.md`; a new
+  or changed one starts the line, alongside dated instruction files.
+- `[runs] checker = [...]` gives the checker its own command (another model
+  or harness than the worker's).
+- Dashboard and status times are in the program's timezone, not the pod's.
+- `program` commands are forwarded to the service only inside a run (when
+  there is a run token), so running `program check` by hand in the service
+  pod works.
+
 ## 2026-11-23 (trust in a line's worktree)
 
 - L0020's first run in its own worktree couldn't use its tools: the pod

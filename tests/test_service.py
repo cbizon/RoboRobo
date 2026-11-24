@@ -32,6 +32,11 @@ else:
            "claims_changed": [], "questions": [], "budget": {}, "open_blockers": [],
            "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
     mode = os.environ.get("STAND_IN_MODE")
+    if mode == "limit":
+        print("You've hit your limit · resets 4:10pm (UTC)")
+        sys.exit(1)
+    if mode == "fail":
+        sys.exit(3)
     if mode == "dirty":
         with open("PROGRAM.md", "a") as f:
             f.write("half-written\n")
@@ -427,3 +432,131 @@ def test_lists_right_after_a_paragraph_render_as_lists():
                           "```\nnot a list:\n1. stays code\n```\n")
     assert "<ol>" in out and "<li>Walk the graph.</li>" in out
     assert "<code>not a list:\n1. stays code\n</code>" in out
+
+
+def test_the_usage_limit_holds_the_program_and_keeps_the_event(served, tmp_path, monkeypatch):
+    db = conn(tmp_path)
+    look(served, db)
+    monkeypatch.setenv("STAND_IN_MODE", "limit")
+    instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
+    look(served, db)
+    (attempt,) = runs(db)
+    assert attempt["counted"] == 0 and attempt["summary"] is None
+    assert db.execute("SELECT status FROM events WHERE kind = 'instruction'").fetchone()[0] == "pending"
+    notes = look(served, db)
+    assert any("waiting for the Claude usage limit; runs start again at" in n for n in notes)
+    assert len(runs(db)) == 1  # nothing starts while the limit holds
+    monkeypatch.delenv("STAND_IN_MODE")
+    look(served, db, timedelta(hours=25))
+    assert [r["counted"] for r in runs(db)] == [0, 1]
+
+
+def test_the_limit_reset_time_is_read_from_the_message(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from roborobo.service import LIMIT
+    found = LIMIT.search("You've hit your limit · resets 4:10pm (UTC)")
+    assert (found[1], found[2], found[3], found[4]) == ("4", "10", "pm", "UTC")
+    assert LIMIT.search("hit your limit, resets 9am (America/New_York)")[4] == "America/New_York"
+
+
+def test_failed_runs_have_their_own_cap_and_dont_use_the_days_runs(served, tmp_path, monkeypatch):
+    db = conn(tmp_path)
+    look(served, db)
+    monkeypatch.setenv("STAND_IN_MODE", "fail")
+    for n in (1, 2, 3):
+        instruct(served, f"## L0001 Heater\n\n1. Attempt {n}.\n")
+        notes = look(served, db)
+    assert [r["counted"] for r in runs(db)] == [0, 0]  # the third didn't start
+    assert any("2 runs today that ended without a summary (the limit)" in n for n in notes)
+
+
+def test_a_line_can_set_a_timer_to_be_started_again(served, tmp_path, monkeypatch):
+    db = conn(tmp_path)
+    look(served, db)
+    prog = config.load(served)
+    database = tmp_path / "state" / "service.db"
+    soon = service.now_utc() + timedelta(minutes=30)
+    service.set_timer(database, prog, "L0001", soon, "collect job 1234")
+    look(served, db)
+    assert runs(db) == []  # not due yet
+    real = service.now_utc
+    monkeypatch.setattr(service, "now_utc", lambda: real() + timedelta(minutes=31))
+    look(served, db)
+    assert [r["line"] for r in runs(db)] == ["L0001"]
+    assert "the timer this line set: collect job 1234" in prompts(tmp_path)[0]
+    monkeypatch.setattr(service, "now_utc", real)
+    with pytest.raises(SystemExit, match="between 10 minutes and 7 days"):
+        service.set_timer(database, prog, "L0001", real() + timedelta(minutes=2), "too soon")
+    for n in range(3):
+        service.set_timer(database, prog, "L0003", real() + timedelta(hours=1 + n), f"t{n}")
+    with pytest.raises(SystemExit, match="already has 3 timers waiting"):
+        service.set_timer(database, prog, "L0003", real() + timedelta(hours=5), "one too many")
+
+
+def test_wake_needs_the_service(served, monkeypatch):
+    monkeypatch.delenv("ROBOROBO_IDS", raising=False)
+    assert "timers belong to the always-on service" in run(
+        "wake", "--repo", served, "--line", "L0001", "--in-minutes", "30", "--reason", "x")
+
+
+def test_wake_under_the_service_sets_a_timer(served, tmp_path, monkeypatch, capsys):
+    db = conn(tmp_path)
+    monkeypatch.setenv("ROBOROBO_IDS", str(tmp_path / "state" / "service.db"))
+    assert run("wake", "--repo", served, "--line", "L0001", "--in-minutes", "45",
+               "--reason", "collect the pilot") == 0
+    assert "L0001 will be started at" in capsys.readouterr().out
+    assert db.execute("SELECT line, reason, fired FROM timers").fetchone()[:] == (
+        "L0001", "collect the pilot", 0)
+
+
+def test_a_lines_own_instruction_starts_its_run(served, tmp_path):
+    db = conn(tmp_path)
+    look(served, db)
+    (served / "lines" / "L0003").mkdir(parents=True)
+    (served / "lines" / "L0003" / "instruction.md").write_text("Try the fan at half speed.\n")
+    commit(served, "an instruction for the fan line")
+    look(served, db)
+    assert [r["line"] for r in runs(db)] == ["L0003"]
+    assert "Your instruction is lines/L0003/instruction.md, this line's own." in prompts(tmp_path)[0]
+    look(served, db)
+    assert len(runs(db)) == 1  # unchanged, so not run again
+    (served / "lines" / "L0003" / "instruction.md").write_text("Now at full speed.\n")
+    commit(served, "changed")
+    look(served, db)
+    assert len(runs(db)) == 2
+
+
+def test_the_service_keeps_rendered_files_in_step_with_roborobo(served, tmp_path):
+    db = conn(tmp_path)
+    look(served, db)
+    with (served / "CLAUDE.md").open("a") as f:
+        f.write("\nAn older RoboRobo rendered this differently.\n")
+    (served / "scheduled" / "session.md").write_text("retired\n")
+    commit(served, "as an older RoboRobo left it")
+    notes = look(served, db)
+    assert notes[0].startswith("synced from RoboRobo: CLAUDE.md")
+    assert "An older RoboRobo" not in (served / "CLAUDE.md").read_text()
+    assert not (served / "scheduled" / "session.md").exists()
+    assert "Sync from RoboRobo: CLAUDE.md, scheduled/session.md" in git(served, "log", "-1", "--format=%s")
+    assert run("check", "--repo", served) == 0
+    assert git(served, "rev-parse", "HEAD") == git(served, "rev-parse", "origin/main")  # pushed
+
+
+def test_the_checker_can_have_its_own_command(served, tmp_path):
+    from roborobo import night
+    prog = config.load(served)
+    marker = tmp_path / "who.txt"
+    prog.runs["checker"] = ["sh", "-c", f'echo checker > {marker}', "sh"]
+    assert night.run_agent(prog, "check it", 1, tmp_path / "c.log", role="checker") is None
+    assert marker.read_text() == "checker\n"
+    marker.unlink()
+    assert night.run_agent(prog, "Run line L0001. write your summary to sessions/x.json "
+                           'Set "instruction" in the summary to "none"', 1, tmp_path / "w.log") is None
+    assert not marker.exists()  # the worker used the agent command
+
+
+def test_commands_are_forwarded_only_inside_a_run(served, monkeypatch, capsys):
+    monkeypatch.setenv("ROBOROBO_SERVICE_URL", "http://127.0.0.1:9")  # nothing listens there
+    monkeypatch.delenv("ROBOROBO_RUN_TOKEN", raising=False)
+    assert run("next-id", "E", "--repo", served) == 0  # ran here, not forwarded
+    assert capsys.readouterr().out.strip() == "E0001"

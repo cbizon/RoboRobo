@@ -147,6 +147,9 @@ DEFAULT_RUNS = {"agent": ["claude", "-p"], "worker_minutes": 60}
 # and the least time between the starts of one line's runs.  Every finished
 # job is an event, so without them a busy cluster would mean a run per job.
 DEFAULT_SERVICE = {"max_runs_per_line_per_day": 3, "min_minutes_between_runs": 60,
+                   # runs that end without a summary don't use up the day's runs;
+                   # they have this cap of their own, so a broken setup can't loop
+                   "max_failed_runs_per_line_per_day": 2,
                    # lines run at once, each in its own worktree (roborobo.lines)
                    "max_parallel_lines": 1}
 

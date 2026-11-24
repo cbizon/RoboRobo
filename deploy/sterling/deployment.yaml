@@ -39,6 +39,9 @@ spec:
             - {name: DASHBOARD_PORT, value: "8080"}
             - {name: API_PORT, value: "8081"}
             - {name: ROBOROBO_RUNNER, value: kubernetes}
+            # Restart between looks when RoboRobo's branch has new commits; the
+            # entrypoint updates it and the service re-syncs each program.
+            - {name: ROBOROBO_SELF_UPDATE, value: "1"}
             - {name: ROBOROBO_VOLUME, value: roborobo-home}
             - {name: ROBOROBO_SERVICE_URL, value: "http://roborobo-api:8081"}
             - {name: ROBOROBO_CLAUDE_SECRET, value: roborobo-claude}

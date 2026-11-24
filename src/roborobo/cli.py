@@ -16,6 +16,8 @@
                                      record a data folder here (or its new manifest)
     program delete A0123 --reason TEXT   delete a data folder, here or on a cluster
     program fetch A0123[:PATH] [--max-mb N]   copy cluster data into tmp/fetch/ to look at
+    program wake --line L --in-minutes N | --at TIME --reason TEXT
+                                     under the service: start a line again later
     program serve --repo DIR [--repo DIR ...] [--state DIR] [--poll-minutes N] [--once]
                                      the always-on service: run lines when there is work
     program serve --resume NAME [--state DIR]   let a paused program run again
@@ -26,7 +28,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from roborobo import artifacts, cluster, config, mapview, night, render, service, service_api
@@ -158,6 +160,23 @@ def cmd_fetch(args) -> int:
     return 0
 
 
+def cmd_wake(args) -> int:
+    database = os.environ.get("ROBOROBO_IDS")
+    if not database:
+        raise SystemExit("timers belong to the always-on service; this program isn't running "
+                         "under it here")
+    program = config.load(args.repo)
+    if args.at:
+        due = datetime.fromisoformat(args.at)
+        due = due if due.tzinfo else due.astimezone()
+    else:
+        due = service.now_utc() + timedelta(minutes=args.in_minutes)
+    service.set_timer(Path(database), program, args.line, due, args.reason)
+    print(f"{args.line} will be started at {service.clock(program, due)} on "
+          f"{due.astimezone():%b %-d}: {args.reason}")
+    return 0
+
+
 def cmd_serve(args) -> int:
     state = args.state.expanduser()
     if args.resume:
@@ -175,7 +194,8 @@ def cmd_serve(args) -> int:
 
 def main(argv=None) -> None:
     args_in = list(sys.argv[1:] if argv is None else argv)
-    if (os.environ.get("ROBOROBO_SERVICE_URL") and args_in
+    if (os.environ.get("ROBOROBO_SERVICE_URL") and os.environ.get("ROBOROBO_RUN_TOKEN")
+            and args_in
             and args_in[0] in service_api.FORWARDED):
         # An agent pod holds no keys: the service runs this command for it.
         sys.exit(service_api.forward(args_in))
@@ -274,6 +294,15 @@ def main(argv=None) -> None:
     ft.add_argument("--max-mb", type=int, default=None,
                     help="refuse anything bigger (default: the host's fetch_max_mb)")
     ft.set_defaults(func=cmd_fetch)
+    wk = sub.add_parser("wake", help="under the service: start a line again at a time you "
+                        "choose, e.g. to collect a job")
+    wk.add_argument("--line", required=True)
+    when = wk.add_mutually_exclusive_group(required=True)
+    when.add_argument("--in-minutes", type=float)
+    when.add_argument("--at", help="a time, e.g. 2026-11-24T06:00")
+    wk.add_argument("--reason", required=True)
+    wk.add_argument("--repo", type=Path, default=Path.cwd())
+    wk.set_defaults(func=cmd_wake)
     sv = sub.add_parser("serve", help="the always-on service: look at each program every few "
                         "minutes and run lines that have new events")
     sv.add_argument("--repo", type=Path, action="append",
