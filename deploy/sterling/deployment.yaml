@@ -45,6 +45,10 @@ spec:
             - {name: ROBOROBO_VOLUME, value: roborobo-home}
             - {name: ROBOROBO_SERVICE_URL, value: "http://roborobo-api:8081"}
             - {name: ROBOROBO_CLAUDE_SECRET, value: roborobo-claude}
+            # What the scientist pastes into the dashboard once, to act from it.
+            # Without the secret the dashboard is read-only. Agent pods never get it.
+            - name: ROBOROBO_DASHBOARD_TOKEN
+              valueFrom: {secretKeyRef: {name: roborobo-dashboard, key: token, optional: true}}
             - name: CLAUDE_CODE_OAUTH_TOKEN
               valueFrom: {secretKeyRef: {name: roborobo-claude, key: CLAUDE_CODE_OAUTH_TOKEN}}
           ports:

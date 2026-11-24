@@ -4,6 +4,26 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (acting from the dashboard)
+
+- With a dashboard token (`ROBOROBO_DASHBOARD_TOKEN`, a Kubernetes secret
+  only the scientist and the service hold) the dashboard has actions:
+  make a proposed line active or drop it, answer a question or instruct a
+  line, resume a paused program or line. The page asks for the token once
+  and keeps it in the browser; it is never written into the page. Agent
+  pods can reach the page but not the token. Without a token the page is
+  read-only, as before.
+- An answer or instruction is appended to `lines/<line>/instruction.md`,
+  newest last, which starts the line: no separate "answers" mechanism.
+- Actions commit to the program's clone under the same lock as the
+  service's own commits, merges and pushes.
+- A line's worktree takes in `main` before each check. On Nov 23 Chris
+  approved a `program.toml` change while L0020 ran; its worktree didn't
+  have it, the check failed there, and the line was paused with good work
+  unmerged.
+- Finished work left on a line's branch is merged at the next look (a run
+  whose line was paused after it, or a service stopped mid-merge).
+
 ## 2026-11-23 (room for parallel lines on Sterling)
 
 - An agent pod's ephemeral-storage limit goes from 1Gi to 256Mi, with its

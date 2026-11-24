@@ -595,11 +595,10 @@ Each phase is useful on its own, and the first tests the main idea cheaply.
    map becomes the review page and the debrief task is retired. *Built
    (Nov 23), served by the service: what needs you, a row per line with
    when it was last heard from, a page per line, every document a line
-   keeps rendered, Discuss links, the map beside it. Not yet: answering on
-   the page (approve a line, answer a question, resume a pause). The page
-   has no login and agent pods can reach it, so anything that writes needs
-   a way to know it is you first. Also not yet: "changed since you last
-   looked", and retiring the debrief.*
+   keeps rendered, Discuss links, the map beside it. With a dashboard token
+   you can act from it: approve or drop a proposed line, answer a question
+   or instruct a line, resume a pause; lines changed since you last opened
+   them are marked. Not yet: retiring the debrief.*
 3. **The service on Sterling.** `roborobo serve` with the inbox, timers and
    dispatcher; `program submit` with Sterling jobs and job-done events;
    line runs in the pod. The dashboard moves into the service. *Built

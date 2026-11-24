@@ -462,7 +462,8 @@ def work(program: Program, started: Started):
     a thread of its own; touches no database."""
     logs = Path(program.data_dir).expanduser() / "logs" / "service" / started.day.isoformat()
     return run_line(started.tree, started.day, started.item.line, started.reasons, None, logs,
-                    stem=started.stem, worker_text=started.worker, checker_text=started.checker)
+                    stem=started.stem, worker_text=started.worker, checker_text=started.checker,
+                    before_check=lambda: lines.refresh(program, started.item.line))
 
 
 def end(conn, program: Program, started: Started, result, go_on: bool) -> list[str]:
@@ -522,6 +523,26 @@ def usage_limit(program: Program, started: Started) -> datetime | None:
     return reset if reset > there else reset + timedelta(days=1)
 
 
+def merge_unmerged(conn, program: Program) -> list[str]:
+    """Merge finished work left on a line's branch into main: a run whose line
+    was paused after it, or one the service was stopped during the merge of.
+    Paused lines wait for their resume."""
+    held = {r["line"] for r in conn.execute("SELECT line FROM paused_lines WHERE program = ?",
+                                            (program.name,))}
+    notes = []
+    for line in lines.unmerged(program):
+        if line in held:
+            continue
+        _, problem = lines.start(program, line)
+        problem = problem or lines.finish(program, line)
+        if problem:
+            pause_line(conn, program, line, problem)
+            notes.append(f"paused {line}: {problem}")
+        else:
+            notes.append(f"merged {line}'s earlier work into main")
+    return notes
+
+
 def run(conn, program: Program, item: Due, at: datetime) -> tuple[bool, str]:
     """Run one line on its own (begin, work, end). Returns whether the
     program can go on, and a note."""
@@ -567,22 +588,24 @@ def look(conn, program: Program, at: datetime | None = None) -> list[str]:
     if paused:
         return [f"paused: {paused['reason']} (resume with `program serve --resume "
                 f"{program.name}`)"]
-    reason = sync(program)
-    if reason:
-        pause(conn, program, reason)
-        return [f"paused: {reason}"]
-    synced = sync_template(program)
-    try:
-        notes = collect(conn, program, today(program, at))
-    except ValueError as error:  # reviews or the ledger don't validate
-        pause(conn, program, str(error))
-        return [f"paused: {error}"]
-    if synced:
-        notes.insert(0, "synced from RoboRobo: " + ", ".join(synced))
-    reason = sync(program)  # push the job records collect committed
-    if reason:
-        pause(conn, program, reason)
-        return notes + [f"paused: {reason}"]
+    with lines.MERGE_LOCK:  # dashboard actions commit to this clone too
+        reason = sync(program)
+        if reason:
+            pause(conn, program, reason)
+            return [f"paused: {reason}"]
+        synced = sync_template(program)
+        try:
+            notes = collect(conn, program, today(program, at))
+        except ValueError as error:  # reviews or the ledger don't validate
+            pause(conn, program, str(error))
+            return [f"paused: {error}"]
+        if synced:
+            notes.insert(0, "synced from RoboRobo: " + ", ".join(synced))
+        notes += merge_unmerged(conn, program)
+        reason = sync(program)  # push the job records collect committed, and merges
+        if reason:
+            pause(conn, program, reason)
+            return notes + [f"paused: {reason}"]
     try:
         ready, waiting = due(conn, program, at)
     except ValueError as error:  # the ledger doesn't validate
@@ -603,8 +626,9 @@ def look(conn, program: Program, at: datetime | None = None) -> list[str]:
         futures = [(started, pool.submit(work, program, started)) for started in batch]
         for started, future in futures:
             result, go_on = future.result()
-            notes += end(conn, program, started, result, go_on)
-            reason = sync(program)
+            with lines.MERGE_LOCK:
+                notes += end(conn, program, started, result, go_on)
+                reason = sync(program)
             if reason:
                 pause(conn, program, reason)
                 notes.append(f"paused: {reason}")
@@ -652,7 +676,7 @@ def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = Fals
         service_api.serve("0.0.0.0", api_port)
         print(f"agent pods' commands on port {api_port}", flush=True)
     if dashboard_port:
-        dashboard.serve_http(state, dashboard_host, dashboard_port)
+        dashboard.serve_http(state, dashboard_host, dashboard_port, repos)
         print(f"dashboard on http://{dashboard_host}:{dashboard_port}/", flush=True)
     while True:
         looks, errors, programs = {}, {}, []

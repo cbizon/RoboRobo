@@ -32,7 +32,9 @@ from roborobo.config import Program
 from roborobo.gitutil import git
 
 LINE_ID = re.compile(r"L\d{4}")
-MERGE_LOCK = threading.Lock()  # one merge into main at a time
+# One thing at a time commits to, merges into or pushes the program's main
+# clone: the service's own steps, a line's merge, an action from the dashboard.
+MERGE_LOCK = threading.RLock()
 
 
 def branch(line: str) -> str:
@@ -80,6 +82,35 @@ def start(program: Program, line: str) -> tuple[Program | None, str | None]:
         git(tree.repo, "merge", "--abort", check=False)
         return None, f"merging {main} into {branch(line)} conflicts ({out.strip()[:200]})"
     return tree, None
+
+
+def refresh(program: Program, line: str) -> str | None:
+    """Merge main into the line's branch again, before a check: main may have
+    moved during the run (a new approval, another line's merge), and the check
+    in the worktree must see what the check on main will. Returns a problem,
+    or None; an unclean worktree is left for the check to report."""
+    tree = worktree_path(program, line)
+    if dirty(tree):
+        return None
+    with MERGE_LOCK:
+        main = main_branch(program)
+    out = git(tree, "merge", "-q", "--no-edit", main, check=False)
+    if dirty(tree):
+        git(tree, "merge", "--abort", check=False)
+        return f"merging {main} into {branch(line)} conflicts ({out.strip()[:200]})"
+    return None
+
+
+def unmerged(program: Program) -> list[str]:
+    """Lines whose branch has commits main doesn't: finished work that was
+    never merged (a run paused after it, or the service stopped in between)."""
+    main = main_branch(program)
+    found = []
+    refs = git(program.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/line/")
+    for ref in refs.split():
+        if int(git(program.repo, "rev-list", "--count", f"{main}..{ref}").strip()):
+            found.append(ref.removeprefix("line/"))
+    return found
 
 
 def finish(program: Program, line: str) -> str | None:

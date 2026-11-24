@@ -105,6 +105,21 @@ kubectl rollout restart -n bizon deploy/roborobo-service
 
   then open <http://localhost:8080/>. It refreshes every minute.
 
+- **Acting from the dashboard:** approve or drop a line the agent proposed,
+  answer a line's question or instruct a line (added to
+  `lines/<line>/instruction.md`, which starts the line), and resume a pause.
+  The page asks once for your dashboard token and keeps it in your browser.
+  Make the token once, and read it back when a browser asks:
+
+  ```bash
+  kubectl create secret generic roborobo-dashboard -n bizon --from-literal=token=$(openssl rand -hex 24)
+  kubectl get secret roborobo-dashboard -n bizon -o jsonpath='{.data.token}' | base64 -d
+  ```
+
+  Agent pods can reach the page but never get the token, so they can't act
+  as you. Approving your own files still takes `program approve` and your
+  signing key.
+
 - **What it is doing:** the log, or the status file.
 
   ```bash
