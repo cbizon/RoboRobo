@@ -137,11 +137,14 @@ def checker_prompt(program: Program, night: date, lid: str) -> str:
             f"and follow it for sessions/{night.isoformat()}-{lid}.json.")
 
 
-def run_agent(program: Program, prompt: str, minutes: float, log: Path) -> str | None:
+def run_agent(program: Program, prompt: str, minutes: float, log: Path,
+              role: str = "agent") -> str | None:
     """Run the configured agent command; return what went wrong, if anything.
-    In the service (ROBOROBO_RUNNER=kubernetes) the run is a pod of its own,
-    without the service's keys; see roborobo.kube."""
-    command = [*program.runs["agent"], prompt]
+    ``[runs] checker`` in program.toml, if set, is the checker's command (a
+    different model or harness than the worker's ``agent``). In the service
+    (ROBOROBO_RUNNER=kubernetes) the run is a pod of its own, without the
+    service's keys; see roborobo.kube."""
+    command = [*(program.runs.get(role) or program.runs["agent"]), prompt]
     log.parent.mkdir(parents=True, exist_ok=True)
     if os.environ.get("ROBOROBO_RUNNER") == "kubernetes":
         token = secrets.token_hex(24)
@@ -231,7 +234,7 @@ def run_line(program: Program, night: date, lid: str, reasons: list[str],
         review = f"reviews/{stem}.json"
         problem = run_agent(program, checker_text or checker_prompt(program, night, lid),
                             float(program.schedule["checker_minutes"]),
-                            logs / f"{log_name}-checker.log")
+                            logs / f"{log_name}-checker.log", role="checker")
         if problem:
             result.problems.append(f"checker {problem}")
         problems, go_on = after_run(program, "checker", review)

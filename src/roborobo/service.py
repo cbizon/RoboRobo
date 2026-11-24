@@ -37,8 +37,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
+import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -47,7 +49,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from roborobo import cluster, config, dashboard, lines, service_api
+from roborobo import ROOT, cluster, config, dashboard, lines, render, service_api
 from roborobo.config import Program
 from roborobo.gitutil import committed_at, git
 from roborobo.mapview import fold_lines
@@ -80,6 +82,19 @@ CREATE TABLE IF NOT EXISTS runs (
     review TEXT,
     problems TEXT
 );
+CREATE TABLE IF NOT EXISTS holds (       -- the program waits, e.g. for the Claude usage limit
+    program TEXT PRIMARY KEY,
+    until TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timers (      -- wake-ups a line set for itself (program wake)
+    id INTEGER PRIMARY KEY,
+    program TEXT NOT NULL,
+    line TEXT NOT NULL,
+    due TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    fired INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS paused (
     program TEXT PRIMARY KEY,
     at TEXT NOT NULL,
@@ -100,6 +115,11 @@ def connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    if "counted" not in {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}:
+        # 1: a run that used one of the line's runs for the day; 0: one that ended
+        # without a summary (a setup failure, or the usage limit)
+        conn.execute("ALTER TABLE runs ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
     return conn
 
 
@@ -136,6 +156,19 @@ def sync(program: Program, remote: str = "origin") -> str | None:
     return None
 
 
+def sync_template(program: Program) -> list[str]:
+    """Bring the files RoboRobo renders (the brief, prompts, Claude Code
+    settings) in line with this RoboRobo, and commit them. They are RoboRobo's
+    files, so the service keeps them current itself after RoboRobo changes;
+    the scientist's files are never touched."""
+    changed = [*render.write_template_owned(program), *render.write_missing_seeded(program),
+               *render.remove_retired(program)]
+    if changed:
+        git(program.repo, "add", "-A", "--", *changed)
+        git(program.repo, "commit", "-q", "-m", "Sync from RoboRobo: " + ", ".join(changed))
+    return changed
+
+
 # --- events ---------------------------------------------------------------------
 
 def add_event(conn, program: Program, line: str, kind: str, key: str, detail: str,
@@ -167,6 +200,45 @@ def instruction_events(program: Program, day: date) -> list[tuple[str, str, str]
         digest = hashlib.sha256((preamble + section).encode()).hexdigest()[:12]
         found.append((mark[1], f"instruction:{rel}:{mark[1]}:{digest}", rel))
     return found
+
+
+def line_instruction_events(program: Program) -> list[tuple[str, str, str]]:
+    """(line, key, detail) for each line's own instruction,
+    lines/<line>/instruction.md, keyed by its contents."""
+    found = []
+    for path in sorted((program.repo / "lines").glob("L[0-9][0-9][0-9][0-9]/instruction.md")):
+        rel = path.relative_to(program.repo).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        found.append((path.parent.name, f"instruction:{rel}:{digest}", rel))
+    return found
+
+
+def timer_events(conn, program: Program, at: datetime) -> list[tuple[str, str, str]]:
+    """Timers lines set for themselves (program wake) that have come due."""
+    found = []
+    for row in conn.execute("SELECT * FROM timers WHERE program = ? AND fired = 0 ORDER BY id",
+                            (program.name,)).fetchall():
+        if datetime.fromisoformat(row["due"]) <= at:
+            found.append((row["line"], f"timer:{row['id']}",
+                          f"the timer this line set: {row['reason']}"))
+            conn.execute("UPDATE timers SET fired = 1 WHERE id = ?", (row["id"],))
+    return found
+
+
+def set_timer(database: Path, program: Program, line: str, due: datetime, reason: str) -> None:
+    """Record a wake-up for a line (program wake). At most three waiting per
+    line, between ten minutes and seven days ahead."""
+    ahead = due - now_utc()
+    if not timedelta(minutes=10) <= ahead <= timedelta(days=7):
+        raise SystemExit("a timer must be between 10 minutes and 7 days ahead")
+    conn = connect(database)
+    waiting = conn.execute("SELECT COUNT(*) FROM timers WHERE program = ? AND line = ? AND "
+                           "fired = 0", (program.name, line)).fetchone()[0]
+    if waiting >= 3:
+        raise SystemExit(f"{line} already has {waiting} timers waiting; that is the most")
+    conn.execute("INSERT INTO timers (program, line, due, reason) VALUES (?, ?, ?, ?)",
+                 (program.name, line, due.isoformat(), reason))
+    conn.commit()
 
 
 def job_events(program: Program) -> tuple[list[tuple[str, str, str, int]], list[str]]:
@@ -211,9 +283,12 @@ def collect(conn, program: Program, day: date) -> list[str]:
         return "pending"
 
     notes = []
-    for line, key, detail in instruction_events(program, day):
+    for line, key, detail in [*instruction_events(program, day),
+                              *line_instruction_events(program)]:
         add_event(conn, program, line, "instruction", key, detail,
                   status(line, committed_at(program.repo, detail)))
+    for line, key, detail in timer_events(conn, program, now_utc()):
+        add_event(conn, program, line, "timer", key, detail)
     for line, review in challenged_lines(program).items():
         add_event(conn, program, line, "challenge", f"challenge:{review}",
                   f"open challenges in {review}", status(line, committed_at(program.repo, review)))
@@ -248,6 +323,13 @@ class Due:
 def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
     """Lines with pending events that may run now, oldest event first, and
     notes on the ones that must wait."""
+    hold = conn.execute("SELECT until, reason FROM holds WHERE program = ?",
+                        (program.name,)).fetchone()
+    if hold:
+        until = datetime.fromisoformat(hold["until"])
+        if at < until:
+            return [], [f"{hold['reason']}; runs start again at {clock(program, until)}"]
+        conn.execute("DELETE FROM holds WHERE program = ?", (program.name,))
     active = active_lines(program)
     held = {r["line"]: r["reason"] for r in conn.execute(
         "SELECT line, reason FROM paused_lines WHERE program = ?", (program.name,))}
@@ -269,10 +351,15 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
             waiting.append(f"{line} is paused: {held[line]} (resume with `program serve "
                            f"--resume {program.name}:{line}`)")
             continue
-        runs_today = conn.execute("SELECT COUNT(*) FROM runs WHERE program = ? AND line = ? "
-                                  "AND day = ?", (program.name, line, day)).fetchone()[0]
+        runs_today, failed_today = conn.execute(
+            "SELECT COALESCE(SUM(counted), 0), COALESCE(SUM(1 - counted), 0) FROM runs "
+            "WHERE program = ? AND line = ? AND day = ?", (program.name, line, day)).fetchone()
         if runs_today >= limits["max_runs_per_line_per_day"]:
             waiting.append(f"{line} has had {runs_today} runs today (the limit)")
+            continue
+        if failed_today >= limits["max_failed_runs_per_line_per_day"]:
+            waiting.append(f"{line} has had {failed_today} runs today that ended without a "
+                           "summary (the limit); see their logs")
             continue
         last = conn.execute("SELECT started FROM runs WHERE program = ? AND line = ? "
                             "ORDER BY id DESC LIMIT 1", (program.name, line)).fetchone()
@@ -280,11 +367,16 @@ def due(conn, program: Program, at: datetime) -> tuple[list[Due], list[str]]:
             gap = timedelta(minutes=limits["min_minutes_between_runs"])
             next_start = datetime.fromisoformat(last["started"]) + gap
             if at < next_start:
-                waiting.append(f"{line} waits until {next_start:%H:%M} (minimum gap)")
+                waiting.append(f"{line} waits until {clock(program, next_start)} (minimum gap)")
                 continue
         ready.append(Due(line, events))
     conn.commit()
     return ready, waiting
+
+
+def clock(program: Program, moment: datetime) -> str:
+    """A time of day in the program's timezone, for notes the scientist reads."""
+    return f"{moment.astimezone(ZoneInfo(program.timezone)):%H:%M %Z}"
 
 
 def where(program: Program, tree: Program) -> str:
@@ -310,8 +402,13 @@ def prompts(program: Program, line: str, stem: str, events: list,
     worker = [f"Run line {line} of the {program.name} research program. {where(program, tree)}. "
               f"Read scheduled/line.md and follow it. The always-on service "
               f"started this run, so write your summary to sessions/{stem}.json. What started "
-              "it: " + "; ".join(reasons) + "."]
-    if instruction:
+              "it: " + "; ".join(reasons) + ". To be started again at a time you choose "
+              "(to collect a job, say), run `program wake --line " + line + " --in-minutes N "
+              "--reason ...`."]
+    if instruction and instruction.startswith("lines/"):
+        worker.append(f"Your instruction is {instruction}, this line's own. If an earlier run "
+                      "already answered it, deal only with what is new.")
+    elif instruction:
         worker.append(f"Your part of the instruction is the `## {line}` section of "
                       f"{instruction}, with anything above the first line section. If an "
                       "earlier run already answered it, deal only with what is new.")
@@ -371,11 +468,21 @@ def work(program: Program, started: Started):
 def end(conn, program: Program, started: Started, result, go_on: bool) -> list[str]:
     """Record the run, then merge a clean run into main and push; a run that
     can't be merged pauses its line. Returns notes."""
-    conn.execute("UPDATE runs SET ended = ?, summary = ?, review = ?, problems = ? WHERE id = ?",
+    conn.execute("UPDATE runs SET ended = ?, summary = ?, review = ?, problems = ?, counted = ? "
+                 "WHERE id = ?",
                  (now_utc().isoformat(), result.summary, result.review,
-                  json.dumps(result.problems), started.run_id))
+                  json.dumps(result.problems), 1 if result.summary else 0, started.run_id))
     conn.commit()
     line = started.item.line
+    if not result.summary:
+        limit = usage_limit(program, started)
+        if limit:
+            # Not the line's doing: its events wait, and so does the whole program.
+            conn.execute("UPDATE events SET status = 'pending', run = NULL WHERE run = ?",
+                         (started.run_id,))
+            conn.execute("INSERT OR REPLACE INTO holds (program, until, reason) VALUES (?, ?, ?)",
+                         (program.name, limit.isoformat(), "waiting for the Claude usage limit"))
+            conn.commit()
     notes = [f"ran {started.stem}: {result.minutes:.0f} min, summary {result.summary or 'none'}, "
              f"review {result.review or 'none'}"
              + (f"; problems: {'; '.join(result.problems)}" if result.problems else "")]
@@ -388,6 +495,31 @@ def end(conn, program: Program, started: Started, result, go_on: bool) -> list[s
         pause_line(conn, program, line, problem)
         return notes + [f"paused {line}: {problem}"]
     return notes
+
+
+LIMIT = re.compile(r"hit your limit.*?resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([^)]+)\)",
+                   re.IGNORECASE | re.DOTALL)
+
+
+def usage_limit(program: Program, started: Started) -> datetime | None:
+    """If the run's worker stopped at the Claude usage limit, when the limit
+    resets (an hour from now if the message doesn't say)."""
+    log = (Path(program.data_dir).expanduser() / "logs" / "service" / started.day.isoformat()
+           / f"{started.stem}-worker.log")
+    text = log.read_text(errors="replace") if log.exists() else ""
+    if "hit your limit" not in text.lower():
+        return None
+    now = now_utc()
+    found = LIMIT.search(text)
+    if not found:
+        return now + timedelta(hours=1)
+    hour, minute, half, zone = int(found[1]) % 12, int(found[2] or 0), found[3].lower(), found[4]
+    try:
+        there = now.astimezone(ZoneInfo(zone.strip()))
+    except (KeyError, ValueError):
+        return now + timedelta(hours=1)
+    reset = there.replace(hour=hour + (12 if half == "pm" else 0), minute=minute, second=0)
+    return reset if reset > there else reset + timedelta(days=1)
 
 
 def run(conn, program: Program, item: Due, at: datetime) -> tuple[bool, str]:
@@ -439,11 +571,14 @@ def look(conn, program: Program, at: datetime | None = None) -> list[str]:
     if reason:
         pause(conn, program, reason)
         return [f"paused: {reason}"]
+    synced = sync_template(program)
     try:
         notes = collect(conn, program, today(program, at))
     except ValueError as error:  # reviews or the ledger don't validate
         pause(conn, program, str(error))
         return [f"paused: {error}"]
+    if synced:
+        notes.insert(0, "synced from RoboRobo: " + ", ".join(synced))
     reason = sync(program)  # push the job records collect committed
     if reason:
         pause(conn, program, reason)
@@ -494,6 +629,17 @@ def write_status(state: Path, conn, looks: dict[str, list[str]]) -> None:
     (state / "status.md").write_text("\n".join(out))
 
 
+def roborobo_behind() -> bool:
+    """Whether RoboRobo's own checkout is behind its remote branch."""
+    try:
+        git(ROOT, "fetch", "-q", "origin")
+        branch = git(ROOT, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        return int(git(ROOT, "rev-list", "--count", f"HEAD..origin/{branch}").strip()) > 0
+    except RuntimeError as error:  # the remote unreachable: tried again next look
+        print(f"couldn't check RoboRobo for updates: {error}", flush=True)
+        return False
+
+
 def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = False,
           dashboard_host: str = "127.0.0.1", dashboard_port: int = 8080,
           api_port: int = 0) -> None:
@@ -529,4 +675,9 @@ def serve(repos: list[Path], state: Path, poll_minutes: float, once: bool = Fals
                 print(f"{now_utc():%Y-%m-%d %H:%M} {name}: {note}", flush=True)
         if once:
             return
+        if os.environ.get("ROBOROBO_SELF_UPDATE") and roborobo_behind():
+            # No run is in progress here. Exit so the pod restarts: its entrypoint
+            # updates RoboRobo, and the next look syncs each program's rendered files.
+            print("RoboRobo has changed on its remote; restarting to update", flush=True)
+            sys.exit(0)
         time.sleep(poll_minutes * 60)

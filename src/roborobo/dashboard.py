@@ -34,6 +34,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import markdown
 
@@ -158,8 +159,15 @@ def is_repo_file(program: Program, rel: str) -> bool:
     return path.is_relative_to(program.repo.resolve()) and path.is_file()
 
 
-def when(epoch: float) -> str:
-    moment = datetime.fromtimestamp(epoch, timezone.utc).astimezone()
+def local(program: Program, iso: str | None) -> str:
+    """A stored time, in the program's timezone."""
+    if not iso:
+        return "running"
+    return f"{datetime.fromisoformat(iso).astimezone(ZoneInfo(program.timezone)):%b %-d %H:%M}"
+
+
+def when(epoch: float, zone: str = "UTC") -> str:
+    moment = datetime.fromtimestamp(epoch, timezone.utc).astimezone(ZoneInfo(zone))
     days = (datetime.now(timezone.utc) - moment).days
     ago = "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago"
     return f"{moment:%b %-d} ({ago})"
@@ -242,7 +250,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
 
     needs = []
     if paused:
-        needs.append(("bad", f"<b>Paused</b> since {esc(paused['at'][:16])}: "
+        needs.append(("bad", f"<b>Paused</b> since {esc(local(program, paused['at']))}: "
                              f"{esc(paused['reason'])}<br><span class=meta>Fix it in the "
                              f"service's clone, then <code>program serve --resume "
                              f"{esc(program.name)}</code></span>"))
@@ -294,7 +302,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         if last:
             problems = json.loads(last["problems"] or "[]")
             run_text = (f"{esc(last['stem'])}<br><span class=meta>"
-                        f"{esc((last['ended'] or 'running')[:16])}</span>"
+                        f"{esc(local(program, last['ended']))}</span>"
                         + (f"<br><span class=bad>{esc('; '.join(problems))}</span>"
                            if problems else ""))
         elif session:
@@ -320,7 +328,7 @@ def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]
         link = discuss_link(program, lid, line.get("name", lid), stem, reviewed)
         heard = last_heard(program, lid, line, all_sessions.get(lid, []), runs)
         quiet = heard and (datetime.now(timezone.utc).timestamp() - heard) > QUIET_DAYS * 86400
-        heard_text = (f"<span class={'warn' if quiet else 'meta'}>{esc(when(heard))}</span>"
+        heard_text = (f"<span class={'warn' if quiet else 'meta'}>{esc(when(heard, program.timezone))}</span>"
                       if heard else "<span class=none>never</span>")
         state = line.get("state", "")
         stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{esc(state)}"
@@ -350,7 +358,7 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     out = [f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
            f"<h1>{esc(lid)} · {esc(line.get('name', ''))}</h1>",
            f"<p class=meta>{esc(line.get('status', ''))} · last heard "
-           f"{esc(when(heard)) if heard else 'never'} · <a href='"
+           f"{esc(when(heard, program.timezone)) if heard else 'never'} · <a href='"
            f"{esc(discuss_link(program, lid, line.get('name', lid), stem, bool(review)))}'>"
            "Discuss</a></p>"]
     if line.get("question"):
@@ -463,7 +471,7 @@ def write(state: Path, conn: sqlite3.Connection, programs: list[Program],
                         f"<pre>{esc(chr(10).join(lines))}</pre></div></div>")
     text = page("RoboRobo service",
                 "<h1>RoboRobo service</h1>"
-                f"<p class=meta>Last look {datetime.now().astimezone():%b %-d, %H:%M %Z}. "
+                f"<p class=meta>Last look {datetime.now(ZoneInfo(programs[0].timezone) if programs else None):%b %-d, %H:%M %Z}. "
                 "This page refreshes every minute. A line's name opens its page; Discuss "
                 "opens a Claude Code thread in your clone.</p>" + "\n".join(sections),
                 refresh=True)
