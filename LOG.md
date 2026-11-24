@@ -4,6 +4,19 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-23 (cancel and move)
+
+- `program cancel <job> --reason ...` stops a job in flight (`scancel`,
+  forwarded from agent pods). A job cancelled on request is recorded as
+  ended without being reported as a problem. Agents had no way to stop a
+  job launched with wrong settings.
+- `program move A0123 --host hatteras` moves a data folder from this machine
+  to a cluster: copy, compare every file there against a fresh manifest
+  here, record a `moved` record (new host and path), and only then delete
+  the local folder. It never overwrites. For the data recorded on the Mac
+  before Hatteras, which runs on Sterling can't see. Not forwarded: agent
+  pods can't move data.
+
 ## 2026-11-23 (the service looks after itself)
 
 - A run stopped by the Claude usage limit no longer counts as done: its

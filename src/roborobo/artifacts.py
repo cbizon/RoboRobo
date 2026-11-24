@@ -118,6 +118,12 @@ def fold(records: list[dict]) -> dict[str, dict]:
                 state[aid].update({k: record[k] for k in
                                    ("files", "bytes", "manifest", "manifest_sha256")})
                 state[aid]["revisions"] += 1
+            elif record["record"] == "moved":
+                state[aid].update(host=record["host"], path=record["path"])
+                if "manifest" in record:
+                    state[aid].update({k: record[k] for k in
+                                       ("files", "bytes", "manifest", "manifest_sha256")})
+                    state[aid]["revisions"] += 1
             else:
                 state[aid]["deleted"] = record
     return state
@@ -408,6 +414,41 @@ def delete(program: Program, aid: str, reason: str, by: str = "agent") -> str:
     append(program, {"record": "deleted", "artifact_id": aid, "at": now(), "by": by,
                      "reason": reason})
     return where
+
+
+def move(program: Program, aid: str, host_name: str, by: str = "agent") -> str:
+    """Move a data folder from this machine to a cluster: copy it, check every
+    file there against a fresh manifest of the files here, record the move,
+    and only then delete it here. Returns where it is now."""
+    from roborobo import cluster
+    current = live(program)
+    if aid not in current:
+        raise SystemExit(f"{aid} is not a live artifact")
+    artifact = current[aid]
+    if artifact["host"] != here():
+        raise SystemExit(f"{aid} is on {artifact['host']}, not on this machine ({here()})")
+    source = Path(located(artifact, program))
+    if not source.is_dir():
+        raise SystemExit(f"{source} is not a folder; only folders are moved")
+    h = cluster.host(program, host_name)
+    dest = f"{h.workdir}/{program.name}/data/{aid}"
+    q = shlex.quote
+    if cluster.remote(h, f"if [ -e {q(dest)} ]; then echo yes; fi").strip():
+        raise SystemExit(f"{dest} already exists on {h.name}; a move never overwrites")
+    cluster.remote(h, f"mkdir -p {q(dest)}")
+    cluster.rsync([f"{source}/", f"{h.ssh}:{dest}/"], f"copying {source} to {h.name}")
+    here_text = local_manifest(source)
+    there_text = cluster.remote(h, f"python3 - {q(dest)}", stdin=MANIFEST_SCRIPT.encode())
+    if here_text != there_text:
+        raise RuntimeError(f"{aid}: the copy in {dest} on {h.name} doesn't match the files in "
+                           f"{source}; nothing was recorded or deleted")
+    revision = artifact["revisions"] + 1
+    record = {"record": "moved", "artifact_id": aid, "at": now(), "by": by, "host": h.name,
+              "path": dest, "note": f"from {artifact['host']}:{artifact['path']}",
+              **write_manifest(program, aid, revision, here_text)}
+    append(program, record)
+    shutil.rmtree(source)
+    return f"{h.name}:{dest}"
 
 
 def fetch(program: Program, ref: str, max_mb: int | None = None) -> Path:

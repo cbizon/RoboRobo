@@ -215,3 +215,49 @@ def test_jobs_that_ended_before_artifacts_get_one(program, capsys):
     assert run("jobs", "--repo", program) == 0
     assert records(program)[0]["job"]["job_id"] == "1001"
     assert cluster.load_jobs(prog)[0]["artifact_id"] == "A0001"
+
+
+def test_move_local_data_to_the_cluster(program, capsys):
+    make(data(program) / "runs" / "E0001" / "a.txt", "first\n")
+    make(data(program) / "runs" / "E0001" / "sub" / "b.txt", "second\n")
+    run("record", "--repo", program, "runs/E0001")
+    capsys.readouterr()
+    assert run("move", "--repo", program, "A0001", "--host", "hatteras", "--by", "human") == 0
+    assert "verified file by file" in capsys.readouterr().out
+    moved = records(program)[-1]
+    assert (moved["record"], moved["host"], moved["by"]) == ("moved", "hatteras", "human")
+    assert moved["path"].endswith("/demo/data/A0001") and moved["files"] == 2
+    with open(moved["path"] + "/sub/b.txt") as there:
+        assert there.read() == "second\n"
+    assert not (data(program) / "runs" / "E0001").exists()  # deleted here only after the check
+    assert artifact_check(program) == ([], [])
+    assert run("fetch", "--repo", program, "A0001:a.txt") == 0  # it is a cluster artifact now
+    assert (data(program) / "tmp" / "fetch" / "A0001" / "a.txt").read_text() == "first\n"
+    assert "A0001 is on hatteras, not on this machine" in run(
+        "move", "--repo", program, "A0001", "--host", "hatteras")
+
+
+def test_a_move_never_overwrites(program, tmp_path):
+    make(data(program) / "runs" / "E0001" / "a.txt")
+    run("record", "--repo", program, "runs/E0001")
+    (tmp_path / "cluster" / "demo" / "data" / "A0001").mkdir(parents=True)
+    assert "already exists on hatteras; a move never overwrites" in run(
+        "move", "--repo", program, "A0001", "--host", "hatteras")
+    assert (data(program) / "runs" / "E0001" / "a.txt").exists()
+
+
+def test_cancel_a_job_in_flight(program, slurm, tmp_path, capsys):  # noqa: F811
+    scancel = tmp_path / "bin" / "scancel"
+    scancel.write_text(f'#!/bin/sh\necho CANCELLED > "{slurm}/$1"\n')
+    scancel.chmod(0o755)
+    (slurm / "hold").touch()
+    assert run("submit", "--repo", program, "--host", "hatteras", "--experiment", "E0001",
+               "--", "true") == 0
+    assert "isn't a job in flight" in run("cancel", "--repo", program, "9999", "--reason", "no such job")
+    assert run("cancel", "--repo", program, "hatteras-1001", "--reason", "wrong box size") == 0
+    capsys.readouterr()
+    assert run("jobs", "--repo", program) == 0  # cancelled on request: not a problem
+    out = capsys.readouterr().out
+    assert "ended   hatteras 1001 E0001 CANCELLED" in out and "problem" not in out
+    recorded = json.loads((program / "evidence" / "E0001" / "hatteras-1001.json").read_text())
+    assert recorded["cancel_requested"]["reason"] == "wrong box size"
