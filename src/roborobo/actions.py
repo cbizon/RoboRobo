@@ -100,10 +100,12 @@ MOVES = {"proposed": {"active", "dropped"}, "active": {"paused", "closed"},
 DONE = {"active": "made active", "dropped": "dropped", "paused": "paused", "closed": "closed"}
 
 
-def line_status(program: Program, lid: str, status: str, comment: str = "") -> str:
+def line_status(program: Program, lid: str, status: str, comment: str = "",
+                purpose: str = "") -> str:
     """Change a line's status: approve or drop a proposed line, pause, close or
     reopen one. Closing, pausing and dropping take a comment, kept as the
-    scientist's note on the line, so the record says why."""
+    scientist's note on the line, so the record says why. A proposed line
+    becomes active only with a purpose: the agent's, or one given here."""
     line = line_of(program, lid)
     now_is = line.get("status", "active")
     if status not in MOVES.get(now_is, set()):
@@ -116,7 +118,16 @@ def line_status(program: Program, lid: str, status: str, comment: str = "") -> s
         raise Refused(f"that is over {MAX_TEXT} characters")
     at = now(program)
     base = {"line_id": lid, "at": at.isoformat(), "by": "human", "night": at.date().isoformat()}
-    records = [{"record": "update", **base, "status": status}]
+    purpose = (purpose or "").strip()
+    if len(purpose) > MAX_TEXT:
+        raise Refused(f"that is over {MAX_TEXT} characters")
+    if now_is == "proposed" and status == "active" and not (purpose or line.get("purpose")):
+        raise Refused(f"{lid} doesn't say what it is for yet. Write its purpose first: a line "
+                      "starts with a clear definition")
+    change = {"record": "update", **base, "status": status}
+    if purpose and status == "active":
+        change["purpose"] = purpose
+    records = [change]
     if comment:
         records.append({"record": "note", **base,
                         "text": f"{DONE[status].capitalize()} by {program.scientist}: {comment}"})
@@ -240,7 +251,7 @@ def perform(state: Path, repos: list[Path], form: dict[str, str]) -> str:
     with lines.MERGE_LOCK:  # the service's own commits, merges and pushes wait, and so do we
         if action == "line-status":
             said = line_status(program, form.get("line", ""), form.get("status", ""),
-                               form.get("comment", ""))
+                               form.get("comment", ""), form.get("purpose", ""))
         elif action == "instruct":
             said = instruct(program, form.get("line", ""), form.get("text", ""),
                             form.get("question", ""))

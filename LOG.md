@@ -4,6 +4,18 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-25 (a line starts defined)
+
+Chris: "when we start a line we need to make sure we get a clear
+definition of the line as well as setting up pins."
+
+- An `open` record carries the line's `purpose`, `closes_when` and its
+  `pinned` items (or why nothing is pinned).
+- A proposed line can't be made active without a purpose. Its page lists
+  what it is for, what closes it and what it will always show, marks what
+  isn't said yet, and takes the purpose from the scientist if the agent
+  gave none.
+
 ## 2026-11-25 (pinned items: what a line always shows)
 
 Chris: "on L0009 the thing that keeps changing is the algorithm. So there
