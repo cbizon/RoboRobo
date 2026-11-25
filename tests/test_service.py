@@ -670,10 +670,17 @@ def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
     page = line_page_of(tmp_path, "L0002")
     assert "<button>Make it active</button>" in page and "<button>Drop it</button>" in page
     assert TOKEN not in page + index  # the token is never written into the page
+    assert "<b>What it is for:</b> <span class=warn>not said yet</span>" in page
+    assert "<textarea name=purpose required" in page
     code, said = acting(action="line-status", line="L0002", status="active")
+    assert code == 403 and "a line starts with a clear definition" in said  # Chris, Nov 25
+    code, said = acting(action="line-status", line="L0002", status="active",
+                        purpose="Check the drift with a second heater, since one is one sample.")
     assert code == 200 and "L0002 is made active." in said
     record = json.loads((served / "ledger" / "lines.jsonl").read_text().splitlines()[-1])
     assert (record["line_id"], record["status"], record["by"]) == ("L0002", "active", "human")
+    assert record["purpose"].startswith("Check the drift with a second heater")
+    assert "Check the drift with a second heater" in line_page_of(tmp_path, "L0002")
     assert "L0002 made active by Pat, from the dashboard" in git(served, "log", "-1", "--format=%s")
     assert git(served, "rev-parse", "HEAD") == git(served, "rev-parse", "origin/main")  # pushed
     assert run("check", "--repo", served) == 0

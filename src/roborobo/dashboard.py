@@ -897,10 +897,25 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
     acts = bool(actions.token())
     out.append("<h3 id=your-turn>Your turn</h3>")
     if status == "proposed":
+        pins = "; ".join(esc(pin["title"]) for pin in line.get("pinned", {}).values())
+        defined = [("What it is for", line.get("purpose")), ("Closes when", line.get("closes_when")),
+                   ("Always shows", pins)]
+        missing = "<span class=warn>not said yet</span>"
+        need = "" if line.get("purpose") else " required"
+        write = ("Change what it is for, if you want (otherwise the above stands)"
+                 if line.get("purpose") else "What this line is for, in your words. It can't "
+                 "start without this")
         out.append("<div class='card turn'>The agent proposed this line. It runs only if you "
-                   "make it active.<br>"
-                   + form(program, "line-status", "Make it active", lid, status="active")
-                   + form(program, "line-status", "Drop it", lid, status="dropped") + "</div>")
+                   "make it active, and it starts with a definition:<ul>"
+                   + "".join(f"<li><b>{label}:</b> {m(value) if label != 'Always shows' else value}"
+                             f"</li>" if value else f"<li><b>{label}:</b> {missing}</li>"
+                             for label, value in defined) + "</ul>"
+                   + form(program, "line-status", "Make it active", lid,
+                          f"<textarea name=purpose{need} placeholder='{write}'></textarea>",
+                          status="active")
+                   + form(program, "line-status", "Drop it", lid, status="dropped")
+                   + "<p class=meta>To add something it should always show, pin it under More "
+                   "before or after making it active.</p></div>")
     elif status != "active":
         out.append(f"<p class=none>This line is {esc(status)}; reopen it under More to "
                    "instruct it.</p>")
