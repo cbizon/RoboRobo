@@ -1,25 +1,29 @@
-"""The service's dashboard: what needs the scientist, then each line.
+"""The service's dashboard: every line's state, then each line's own page.
 
 ``program serve`` writes ``<state>/dashboard/index.html`` after every look,
 and each program's map beside it (``<state>/dashboard/<program>/map.html``),
-and serves the folder over HTTP. The page is built from the records and the
-service's database; no prose is written here.
+and serves the folder over HTTP. The pages are built from the records and
+the service's database; no prose is written here.
 
-Top of the page, per program, **needs you**: the program paused (and the
-command to resume it), lines the agent proposed, questions from the latest
-run of each line, open challenges, failed or vanished jobs, and lines held
-back by the service's limits. Then **lines**: one row per active line with
-where it stands (in full, folded), when it was last heard from, its last
-run, the checker's verdicts, jobs in flight and pending events, and a
-Discuss link that opens a Claude Code thread on that line in the
-scientist's clone.
+The home page is a list and nothing is answered on it: per program, anything
+wrong with the program as a whole (paused, failed jobs), then its lines
+grouped by state: stopped, waiting on the scientist, running, queued, idle,
+with the paused, closed and dropped ones folded away. Each row says what
+the line is for and what happens next.
 
-Each line also gets a page (``<program>/lines/<line>.html``): its question,
-where it stands, its progress notes, the latest run's answers and questions,
-the checker's review, recent runs and notes, and its documents. Every
-document a line keeps (files in ``lines/<line>/`` and files its records
-point to) gets a page of its own (``<program>/docs/<path>.html``): Markdown
-rendered, JSON laid out, anything else as text.
+Each line has a page (``<program>/lines/<line>.html``) meant to be read top
+to bottom: its state in a sentence; what it is for (the agent's ``purpose``,
+then the scientist's own words); where it stands; its latest run, with the
+checker's view of it or why it wasn't checked; the scientist's turn (each
+question of that run with its context, collapsing to the answer once
+answered, and a box for anything else); earlier runs. A bar fixed to the
+foot of the window says what is saved and holds Start, the only thing that
+runs the line. Documents, notes, pause and close are folded under More.
+
+Every document a line keeps (files in ``lines/<line>/``, files its records
+point to, its runs' summaries and reviews) gets a page of its own
+(``<program>/docs/<path>.html``): Markdown rendered, JSON laid out, anything
+else as text.
 """
 
 from __future__ import annotations
@@ -97,10 +101,31 @@ form.act button:disabled { opacity: .6; cursor: default; }
 .new { background: var(--accent); color: var(--surface); border-radius: 4px; padding: 0 5px;
   font-size: .75rem; margin-left: 4px; }
 details summary { cursor: pointer; } details[open] summary { color: var(--muted); }
-.doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+div.doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 4px 18px; overflow-x: auto; }
-.doc table { width: auto; } pre { white-space: pre-wrap; word-break: break-word; }
-@media (max-width: 700px) { td:nth-child(5), th:nth-child(5) { display: none; } }
+div.doc table { width: auto; } pre { white-space: pre-wrap; word-break: break-word; }
+.said { position: sticky; top: 8px; z-index: 2; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
+.row { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; margin: 6px 0; }
+.row-head a { text-decoration: none; font-size: 1.02rem; } .row-head .state { margin-left: 6px; }
+.row-now { font-weight: 600; margin-top: 2px; } .row-what { margin-top: 4px; }
+.row-facts { margin-top: 4px; }
+details.inactive { margin-top: 20px; } details.inactive .row { opacity: .8; }
+.now { font-size: 1.05rem; font-weight: 600; }
+blockquote { margin: 8px 0; padding: 4px 14px; border-left: 3px solid var(--line); }
+.who { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em;
+  margin: 14px 0 4px; }
+.reply { border-left: 3px solid var(--line); padding: 2px 12px; margin: 8px 0; }
+.turn { border-left: 4px solid var(--warn); } .turn.done { border-left-color: var(--good); }
+.answered { margin: 8px 0 2px; white-space: pre-wrap; }
+details.card > summary { color: var(--fg); }
+details.more { margin-top: 28px; } details.more > summary { font-weight: 600; }
+body { padding-bottom: 90px; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface);
+  border-top: 2px solid var(--accent); box-shadow: 0 -2px 8px rgba(0, 0, 0, .15); }
+.bar-in { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 14px;
+  align-items: center; justify-content: space-between; font-weight: 600; }
+.bar form.act { margin: 0; flex: none; }
 """
 QUIET_DAYS = 3        # an active line not heard from in longer is marked
 MAX_DOC_BYTES = 2_000_000
@@ -122,19 +147,9 @@ def signature(line: dict, summary: str | None, review: str | None) -> str:
 # was seen is kept in the browser only (localStorage); without it, nothing is
 # marked and the page reads the same.
 MARK_NEW = """<script>
-document.querySelectorAll(".show-inactive").forEach(function (box) {
-  var rows = box.closest("label").nextElementSibling.querySelectorAll("tr.inactive");
-  function apply() { rows.forEach(function (row) { row.hidden = !box.checked; }); }
-  try { box.checked = localStorage.getItem("roborobo:show-inactive") === "1"; } catch (e) {}
-  apply();
-  box.addEventListener("change", function () {
-    try { localStorage.setItem("roborobo:show-inactive", box.checked ? "1" : "0"); } catch (e) {}
-    apply();
-  });
-});
 try {
-  document.querySelectorAll("tr[data-line]").forEach(function (row) {
-    if (!row.classList.contains("inactive") &&
+  document.querySelectorAll(".row[data-line]").forEach(function (row) {
+    if (!row.closest("details.inactive") &&
         localStorage.getItem("roborobo:" + row.dataset.line) !== row.dataset.sig) {
       row.querySelector(".new").hidden = false;
     }
@@ -308,55 +323,90 @@ SAID = """<script>
   banner.className = "said";
   banner.textContent = said;
   document.body.insertBefore(banner, document.body.firstChild);
-  history.replaceState(null, "", location.pathname);
+  history.replaceState(null, "", location.pathname + location.hash);
 })();
 </script>"""
 
 
-def instruction_status(conn: sqlite3.Connection, program: Program, lid: str,
-                       base: str) -> str:
-    """The scientist's latest instruction to a line and what has happened to
-    it, or nothing if the line has no instruction of its own."""
+def plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+ENTRY_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?")
+
+
+def instruction_entries(program: Program, lid: str) -> list[dict]:
+    """What the scientist has written in the line's own instruction file,
+    oldest first: each entry's heading, when it was written, the question it
+    answers (if it quotes one) and its text."""
     path = program.repo / "lines" / lid / "instruction.md"
     if not path.is_file():
-        return ""
-    raw = path.read_bytes()
-    entries = [e for e in raw.decode(errors="replace").split("\n## ")[1:] if e.strip()]
-    if not entries:
-        return ""
-    heading, _, body = entries[-1].partition("\n")
-    words = " ".join(line for line in body.splitlines() if not line.startswith(">")).split()
-    excerpt = " ".join(words)
-    excerpt = excerpt if len(excerpt) <= 160 else excerpt[:157].rsplit(" ", 1)[0] + "…"
-    key = f"instruction:lines/{lid}/instruction.md:{hashlib.sha256(raw).hexdigest()[:12]}"
-    event = conn.execute("SELECT status, run FROM events WHERE program = ? AND key = ?",
-                         (program.name, key)).fetchone()
-    if event is None or event["status"] == "held":
-        status = "saved, not started: press Start when you've said everything"
-    elif event["status"] == "pending":
-        status = "started by you; the run begins within a minute"
-    elif event["run"]:
-        run = conn.execute("SELECT stem, ended, summary FROM runs WHERE id = ?",
-                           (event["run"],)).fetchone()
-        if run and not run["ended"]:
-            status = f"run {run['stem']} is working on it now"
-        elif run and run["summary"]:
-            status = f"answered by run {run['stem']}"
-        else:
-            status = f"run {run['stem'] if run else '?'} ended without a summary"
-    else:
-        status = event["status"]
-    link = f"<a class=doc href='{esc(base)}docs/lines/{esc(lid)}/instruction.md.html'>"
-    return (f"<b>Your instruction</b> <span class=meta>({esc(heading.split(',')[0].strip())})"
-            f"</span>: {link}{esc(excerpt)}</a><br><span class=meta>→ {esc(status)}</span>")
+        return []
+    entries = []
+    for entry in path.read_text(errors="replace").split("\n## ")[1:]:
+        heading, _, body = entry.partition("\n")
+        found = ENTRY_TIME.search(heading)
+        at = datetime.strptime(f"{found[1]} {found[2]}{found[3] or ':00'}", "%Y-%m-%d %H:%M:%S") \
+            .replace(tzinfo=ZoneInfo(program.timezone)).timestamp() if found else None
+        rows = body.strip().splitlines()
+        question = " ".join(row[1:].strip() for row in rows if row.startswith(">"))
+        text = body.strip()
+        if question and "Answer:" in rows:
+            text = "\n".join(rows[rows.index("Answer:") + 1:]).strip()
+        if text:
+            entries.append({"heading": heading.strip(), "at": at, "question": question,
+                            "text": text, "to_the_minute": bool(found and not found[3])})
+    return entries
+
+
+def your_turn(conn: sqlite3.Connection, program: Program, lid: str,
+              summary: tuple[str, dict] | None) -> dict:
+    """What the line is waiting to hear and what it has been told since its
+    last run: ``questions`` pairs each question of the latest run with the
+    scientist's answer to it (or None), ``others`` is everything else said
+    since."""
+    last = conn.execute("SELECT started FROM runs WHERE program = ? AND line = ? "
+                        "ORDER BY id DESC", (program.name, lid)).fetchone()
+    summarised = committed_at(program.repo, summary[0]) if summary else 0
+    since = datetime.fromisoformat(last["started"]).timestamp() if last else summarised
+    path = program.repo / "lines" / lid / "instruction.md"
+    written = committed_at(program.repo, path.relative_to(program.repo).as_posix()) \
+        if path.is_file() else 0
+    waiting = conn.execute("SELECT 1 FROM events WHERE program = ? AND line = ? AND kind = "
+                           "'instruction' AND status IN ('held', 'pending')",
+                           (program.name, lid)).fetchone()
+
+    def is_new(entry: dict) -> bool:
+        if entry["at"] is None:  # no time in its heading: go by the file
+            return written > since
+        # A heading written by hand carries minutes only: an entry in the run's
+        # own minute is new only if the service still holds an instruction.
+        if entry["to_the_minute"] and entry["at"] < since:
+            return entry["at"] + 60 > since and bool(waiting)
+        return entry["at"] >= int(since)
+
+    new = [entry for entry in instruction_entries(program, lid) if is_new(entry)]
+    asked = summary[1].get("questions", []) if summary and summarised >= answered_after(program) \
+        else []
+    same = lambda text: " ".join(str(text).split())  # noqa: E731
+    questions = []
+    for question in asked:
+        answers = [e for e in new if same(e["question"]) == same(question["question"])]
+        questions.append((question, answers[-1] if answers else None))
+    asked_texts = {same(question["question"]) for question in asked}
+    others = [e for e in new if same(e["question"]) not in asked_texts or not e["question"]]
+    return {"questions": questions, "others": others,
+            "answered": sum(1 for _, answer in questions if answer)}
 
 
 def line_state(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
                summary: tuple[str, dict] | None, open_jobs: list[dict],
                notes: list[str]) -> tuple[str, str, str]:
     """Where a line is, as one of a few states: (key, label, detail). The key
-    picks the badge's colour."""
+    picks the badge's colour; the detail says what happens next."""
     status = line.get("status", "active")
+    if status == "proposed":
+        return "you", "Proposed by the agent", "yours to make active or drop; it doesn't run until then"
     if status != "active":
         return status, status.capitalize(), ""
     name = program.name
@@ -372,25 +422,32 @@ def line_state(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
                           "status IN ('pending', 'held')", (name, lid)).fetchall()
     if any(e["kind"] == "start" for e in events):
         return "queued", "Starting", "you pressed Start; the run begins within a minute"
-    path = program.repo / "lines" / lid / "instruction.md"
-    told = committed_at(program.repo, path.relative_to(program.repo).as_posix()) if path.is_file() else 0
-    if any(e["status"] == "held" for e in events):
-        return "you", "Ready when you are", "your instructions are saved; press Start to run them"
-    asked = summary and summary[1].get("questions") and committed_at(program.repo, summary[0]) > max(
-        told, answered_after(program))
-    if asked:
-        count = len(summary[1]["questions"])
-        return "you", f"Asks you {count} question{'s' if count != 1 else ''}", \
-            "answer on the line's page, then press Start"
+    turn = your_turn(conn, program, lid, summary)
+    asked, answered, told = len(turn["questions"]), turn["answered"], len(turn["others"])
+    saved = answered + told or any(e["status"] == "held" for e in events)
+    if asked or saved:
+        parts = []
+        if asked:
+            parts.append(f"{answered} of {plural(asked, 'question')} answered")
+        if told:
+            parts.append(f"{plural(told, 'instruction')} saved")
+        if saved:
+            what = "Nothing runs until you press Start."
+        elif events or open_jobs:
+            what = "It still runs when its jobs end, taking its stated defaults."
+        else:
+            what = "Nothing runs until you press Start."
+        label = "Waiting on you" if asked > answered else "Ready when you are"
+        return "you", label, ", ".join(parts or ["your instructions are saved"]) + ". " + what
     if events:
         why = next((n.removeprefix("waiting: ") for n in notes
                     if n.startswith(f"waiting: {lid} ")), "starts at the service's next look")
         return "queued", "Queued", why
     if open_jobs:
         hosts = ", ".join(sorted({j["host"] for j in open_jobs}))
-        return "jobs", f"Waiting on {len(open_jobs)} job{'s' if len(open_jobs) != 1 else ''}", \
+        return "jobs", f"Waiting on {plural(len(open_jobs), 'job')}", \
             f"on {hosts}; the line runs again when one ends"
-    return "idle", "Idle", "nothing queued; instruct it or press Start to run it"
+    return "idle", "Idle", "nothing queued; it runs when you press Start on its page"
 
 
 def badge(state: tuple[str, str, str]) -> str:
@@ -556,144 +613,124 @@ def answered_after(program: Program) -> int:
     return committed_at(program.repo, files[-1].relative_to(program.repo).as_posix()) if files else 0
 
 
+def verdict_counts(review: dict) -> str:
+    verdicts = [r["verdict"] for r in review.get("reviews", [])]
+    return " ".join(f"<span class={'good' if v == 'holds' else 'bad'}>{verdicts.count(v)} {v}</span>"
+                    for v in ("holds", "doubtful", "broken") if verdicts.count(v)) \
+        or "<span class=none>no claims to check</span>"
+
+
+# Groups of the home page, in order: (state keys, heading).
+GROUPS = [(("stuck",), "Stopped: needs fixing"), (("you",), "Waiting on you"),
+          (("running",), "Running"), (("queued", "jobs"), "Queued, or waiting on jobs"),
+          (("idle",), "Idle")]
+
+
 def program_section(conn: sqlite3.Connection, program: Program, notes: list[str]) -> str:
+    """The home page's part for one program: its lines, grouped by what state
+    each is in. Nothing is answered here; each line's page has its story and
+    its questions."""
     records, _ = load_ledger(program)
     lines = fold_lines(records.get("lines.jsonl", []))
     all_sessions, _ = line_documents_by_kind(program)
     sessions, reviews = latest_documents(program)
     m = Marks(program, lines, program_terms(records), f"{program.name}/")
     open_jobs = [j for j in cluster.load_jobs(program) if not j.get("ended_at")]
-    paused = conn.execute("SELECT at, reason FROM paused WHERE program = ?",
-                          (program.name,)).fetchone()
-    pending = conn.execute("SELECT line, detail FROM events WHERE program = ? AND "
-                           "status = 'pending' ORDER BY id", (program.name,)).fetchall()
     runs = conn.execute("SELECT * FROM runs WHERE program = ? ORDER BY id DESC",
                         (program.name,)).fetchall()
-
-    needs = []
-    if paused:
-        needs.append(("bad", f"<b>Paused</b> since {esc(local(program, paused['at']))}: "
-                             f"{m(paused['reason'])}<br><span class=meta>Fix it in the "
-                             f"service's clone, then <code>program serve --resume "
-                             f"{esc(program.name)}</code></span>"
-                             + form(program, "resume", "Resume")))
-    for held in conn.execute("SELECT line, at, reason FROM paused_lines WHERE program = ? "
-                             "ORDER BY line", (program.name,)):
-        needs.append(("bad", f"<b>{m(held['line'])} paused</b> since {esc(local(program, held['at']))}: "
-                             f"{m(held['reason'])}<br><span class=meta>Fix it in the line's "
-                             f"worktree, then <code>program serve --resume "
-                             f"{esc(program.name)}:{esc(held['line'])}</code></span>"
-                             + form(program, "resume", f"Resume {held['line']}", held["line"])))
-    for lid, line in sorted(lines.items()):
-        if line.get("status") == "proposed":
-            needs.append(("", f"<b>{m(lid)} proposed</b> by the agent: "
-                              f"{esc(line.get('name', ''))}. {m(line.get('reason', ''))}"
-                              "<br><span class=meta>Make it active (a line update by you) or "
-                              "drop it.</span><br>"
-                              + form(program, "line-status", "Make it active", lid, status="active")
-                              + form(program, "line-status", "Drop it", lid, status="dropped")))
-    answered = answered_after(program)
-    for lid, (rel, doc) in sorted(sessions.items()):
-        if committed_at(program.repo, rel) < answered:
-            continue  # asked before the newest instruction, which answers it
-        for question in doc.get("questions", []):
-            needs.append(("", f"<b>{m(lid)} asks</b> <span class=meta>({esc(Path(rel).stem)})"
-                              f"</span>: {m(question['question'])}<br><span class=meta>Why it "
-                              f"matters: {m(question['why_it_matters'])}<br>If "
-                              f"unanswered: {m(question['default_if_unanswered'])}</span>"
-                              + form(program, "instruct", f"Answer {lid}", lid,
-                                     "<textarea name=text required placeholder='Your answer; it "
-                                     "goes into the line&#39;s instruction; nothing runs until you press Start'>"
-                                     "</textarea>", question=question["question"])))
-    for lid, (rel, review) in sorted(reviews.items()):
-        doubtful = [r for r in review.get("reviews", []) if r["verdict"] in ("doubtful", "broken")]
-        if doubtful:
-            needs.append(("bad", f"<b>{m(lid)}: the checker doubts "
-                                 f"{len(doubtful)} claim(s)</b> <span class=meta>("
-                                 f"{esc(Path(rel).stem)})</span>: "
-                                 + "; ".join(m(r["plain_claim"]) for r in doubtful)))
-    for note in notes:
-        if note.startswith(("job problem:", "waiting:", "error")):
-            needs.append(("bad" if note.startswith(("job", "error")) else "", m(note)))
-
     out = [f"<h2>{esc(program.name)}</h2>",
            f"<p class=meta>{esc(program.title)} · <a href='{esc(program.name)}/map.html'>"
-           f"program map</a> · <a href='{esc(program.name)}/terms.html'>terms</a></p>", "<h3>Needs you</h3>", "<div class=needs>"]
-    out += [f"<div class='card {kind}'>{text}</div>" for kind, text in needs] or [
-        "<div class=card style='border-left-color:var(--good)'>Nothing.</div>"]
-    out.append("</div><h3>Lines</h3>")
-    inactive = sum(1 for line in lines.values() if line.get("status") != "active")
-    if inactive:  # directly before the table: the page's script finds the rows from here
-        out.append(f"<label class=meta><input type=checkbox class=show-inactive> Show the "
-                   f"{inactive} paused, closed, dropped and proposed lines</label>")
-    out.append("<table><tr><th>Line</th><th>State</th><th>Where it stands</th>"
-               "<th>Last heard</th><th>Last run</th><th>Checker</th><th>In flight</th>"
-               "<th></th></tr>")
-    for lid, line in sorted(lines.items(), key=lambda item: (item[1].get("status") != "active",
-                                                             item[0])):
-        is_active = line.get("status") == "active"
-        last = next((r for r in runs if r["line"] == lid), None)
-        session = sessions.get(lid)
-        review = reviews.get(lid)
-        stem = Path(session[0]).stem if session else None
-        if last:
-            problems = json.loads(last["problems"] or "[]")
-            run_text = (f"{esc(last['stem'])}<br><span class=meta>"
-                        f"{esc(local(program, last['ended']))}</span>"
-                        + (f"<br><span class=bad>{esc('; '.join(problems))}</span>"
-                           if problems else ""))
-        elif session:
-            run_text = f"{esc(stem)}<br><span class=meta>before the service</span>"
-        else:
-            run_text = "<span class=none>none yet</span>"
-        if session:
-            run_text += f"<br>{m(session[1].get('headline', ''))}"
-        if review:
-            verdicts = [r["verdict"] for r in review[1].get("reviews", [])]
-            counts = {v: verdicts.count(v) for v in ("holds", "doubtful", "broken")}
-            check = " ".join(f"<span class={'good' if v == 'holds' else 'bad'}>{n} {v}</span>"
-                             for v, n in counts.items() if n) or "<span class=none>no claims</span>"
-        else:
-            check = "<span class=none>not checked</span>"
+           f"program map</a> · <a href='{esc(program.name)}/terms.html'>terms</a></p>"]
+    paused = conn.execute("SELECT at, reason FROM paused WHERE program = ?",
+                          (program.name,)).fetchone()
+    trouble = []
+    if paused:
+        trouble.append(f"<b>The whole program is paused</b> since {esc(local(program, paused['at']))}: "
+                       f"{m(paused['reason'])}<br><span class=meta>Fix it in the service's "
+                       f"clone, then <code>program serve --resume {esc(program.name)}</code>"
+                       "</span>" + form(program, "resume", "Resume"))
+    trouble += [m(note) for note in notes if note.startswith(("job problem:", "error"))]
+    if trouble:
+        out += ["<div class=needs>"] + [f"<div class='card bad'>{text}</div>" for text in trouble] \
+            + ["</div>"]
+
+    rows: dict[str, list[str]] = {}
+    for lid, line in sorted(lines.items()):
+        session, review = sessions.get(lid), reviews.get(lid)
         jobs = [j for j in open_jobs if j.get("line_id") == lid]
-        events = [p for p in pending if p["line"] == lid]
-        flight = []
-        if jobs:
-            flight.append(f"{len(jobs)} job(s) on {esc(', '.join(sorted({j['host'] for j in jobs})))}")
-        flight += [f"waiting: {esc(e['detail'])}" for e in events]
-        reviewed = bool(review) and Path(review[0]).stem == stem
-        link = discuss_link(program, lid, line.get("name", lid), stem, reviewed)
+        key, label, detail = line_state(conn, program, lid, line, session, jobs, notes)
+        what = line.get("purpose") or line.get("state") or line.get("question") or ""
+        facts = []
+        if line.get("next") and key not in ("closed", "dropped"):
+            facts.append(f"<b>Next:</b> {m(line['next'])}")
+        if session:
+            reviewed = review and Path(review[0]).stem == Path(session[0]).stem
+            facts.append("Last run " + esc(Path(session[0]).stem[:10]) + ": "
+                         + (f"checker {verdict_counts(review[1])}" if reviewed
+                            else "<span class=warn>not checked</span>"))
         heard = last_heard(program, lid, line, all_sessions.get(lid, []), runs)
         quiet = heard and (datetime.now(timezone.utc).timestamp() - heard) > QUIET_DAYS * 86400
-        heard_text = (f"<span class={'warn' if quiet else 'meta'}>{esc(when(heard, program.timezone))}</span>"
-                      if heard else "<span class=none>never</span>")
-        state = line.get("state", "")
-        stands = (f"<details><summary>{esc(mapview.short(state, 160))}</summary>{m(state)}"
-                  "</details>" if len(state) > 160 else m(state))
-        links = related(lines, lid, f"{program.name}/")
-        stands += (f"<div class=ahead>{ahead(line, m)}"
-                   + (f"<br><span class=meta>{links}</span>" if links else "") + "</div>")
-        told = instruction_status(conn, program, lid, f"{program.name}/")
-        if told:
-            stands += f"<div class=ahead>{told}</div>"
+        if heard:
+            facts.append(f"<span class={'warn' if quiet and key == 'idle' else 'meta'}>last heard "
+                         f"{esc(when(heard, program.timezone))}</span>")
         sig = signature(line, session[0] if session else None, review[0] if review else None)
-        state_now = line_state(conn, program, lid, line, session, jobs, notes)
-        can_start = is_active and state_now[0] not in ("running", "stuck") \
-            and state_now[1] != "Starting"
-        start = form(program, "start", "Start", lid) if can_start else ""
-        status = "" if is_active else f"<br><span class=status>{esc(line.get('status', ''))}</span>"
-        out.append(f"<tr data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'"
-                   + ("" if is_active else " class=inactive hidden") + ">"
-                   f"<td><a href='{esc(program.name)}/lines/{esc(lid)}.html'><b>{esc(lid)}"
-                   f"</b></a><span class=new hidden>new</span><br>{esc(line.get('name', ''))}"
-                   f"{status}</td>"
-                   f"<td>{badge(state_now)}</td>"
-                   f"<td>{stands}</td><td>{heard_text}</td>"
-                   f"<td>{run_text}</td><td>{check}</td>"
-                   f"<td>{'<br>'.join(flight) or '<span class=none>nothing</span>'}</td>"
-                   f"<td><a href='{esc(link)}'>Discuss</a>{start}</td></tr>")
-    out.append("</table>")
+        href = f"{esc(program.name)}/lines/{esc(lid)}.html"
+        rows.setdefault(key, []).append(
+            f"<div class='row' data-line='{esc(program.name)}/{esc(lid)}' data-sig='{sig}'>"
+            f"<div class=row-head><a href='{href}'><b>{esc(lid)}</b> · {esc(line.get('name', ''))}"
+            f"</a><span class=new hidden>new</span> <span class='state state-{esc(key)}'>"
+            f"{esc(label)}</span></div>"
+            + (f"<div class=row-now>{m(detail[:1].upper() + detail[1:])}</div>" if detail else "")
+            + f"<div class=row-what>{m(mapview.short(what, 260))}</div>"
+            + (f"<div class='meta row-facts'>{' · '.join(facts)}</div>" if facts else "")
+            + "</div><!--/row-->")
+    for keys, heading in GROUPS:
+        group = [row for key in keys for row in rows.get(key, [])]
+        if group:
+            out += [f"<h3>{esc(heading)} ({len(group)})</h3>", *group]
+    rest = [row for key in ("paused", "closed", "dropped") for row in rows.get(key, [])]
+    if rest:
+        out += [f"<details class=inactive><summary>Show the {len(rest)} paused, closed and "
+                "dropped lines</summary>", *rest, "</details>"]
+    if not lines:
+        out.append("<p class=none>No lines yet.</p>")
     out.append(MARK_NEW)
+    return "\n".join(out)
+
+
+def run_story(program: Program, m: Marks, rel: str, doc: dict, review: tuple[str, dict] | None,
+              run, base: str) -> str:
+    """One run, told in order: what the agent reported, then what the checker
+    made of it (or that it wasn't checked, and why)."""
+    out = [f"<p><b>{m(doc.get('headline', ''))}</b></p>"]
+    if doc.get("answers"):
+        out.append("<details><summary>The agent's replies to the "
+                   f"{plural(len(doc['answers']), 'thing')} you had asked</summary>")
+        for answer in doc["answers"]:
+            status = answer["status"].replace("_", " ")
+            out.append(f"<div class=reply><span class=meta>You asked:</span> {m(answer['asked'])}"
+                       f"<br><span class=meta>The agent ({esc(status)}):</span> "
+                       f"{m(answer['answer'])}</div>")
+        out.append("</details>")
+    out.append(f"<p class=meta><a href='{esc(base)}docs/{esc(rel)}.html'>The run's full "
+               "summary</a></p>")
+    out.append("<p class=who>The checker (a second agent that tries to break the run's claims)</p>")
+    if review:
+        review_rel, checked = review
+        out.append(f"<p>{m(checked.get('summary', ''))} <a class=meta href='{esc(base)}docs/"
+                   f"{esc(review_rel)}.html'>full review</a></p>")
+        for item in checked.get("reviews", []):
+            kind = "good" if item["verdict"] == "holds" else "bad"
+            out.append(f"<div class=reply><span class={kind}><b>{esc(item['verdict'])}</b></span>: "
+                       f"{m(item.get('plain_claim', ''))}"
+                       + (f"<br><span class=meta>{m(item['what_would_resolve'])}</span>"
+                          if item.get("what_would_resolve") else "") + "</div>")
+    else:
+        problems = json.loads(run["problems"] or "[]") if run else []
+        why = ("The run stopped on a problem (" + "; ".join(problems) + ") and was put right "
+               "afterwards, so the checker's step never ran.") if problems else \
+            "There is no review of this run."
+        out.append(f"<p class=warn>Not checked. {esc(why)}</p>")
     return "\n".join(out)
 
 
@@ -701,65 +738,125 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
               summaries: list[tuple[str, dict]], reviews: list[tuple[str, dict]],
               notes: list[str], lines: dict[str, dict] | None = None,
               m: Marks | None = None) -> str:
-    """Everything about one line on one page."""
+    """One line, read top to bottom: its state in a sentence, what it is for,
+    where it stands, its latest run with the checker's view, the scientist's
+    turn, then earlier runs. A bar at the foot of the window says what will run and holds Start.
+    Everything else is folded under More."""
     lines = lines or {lid: line}
     m = m or Marks(program, lines, [], "../")
     runs = conn.execute("SELECT * FROM runs WHERE program = ? AND line = ? ORDER BY id DESC",
                         (program.name, lid)).fetchall()
+    by_stem = {r["stem"]: r for r in runs}
+    reviewed = {Path(rel).stem: (rel, doc) for rel, doc in reviews}
     open_jobs = [j for j in cluster.load_jobs(program)
                  if not j.get("ended_at") and j.get("line_id") == lid]
     heard = last_heard(program, lid, line, summaries, runs)
     latest = summaries[-1] if summaries else None
-    state_now = line_state(conn, program, lid, line, latest, open_jobs, notes)
+    key, label, detail = state_now = line_state(conn, program, lid, line, latest, open_jobs, notes)
     stem = Path(latest[0]).stem if latest else None
-    review = next((r for r in reversed(reviews) if Path(r[0]).stem == stem), None)
+    status = line.get("status", "active")
+    discuss = (f"<a href='{esc(discuss_link(program, lid, line.get('name', lid), stem, stem in reviewed))}'>"
+               "Discuss it in a Claude thread</a>")
     sig = signature(line, latest[0] if latest else None, reviews[-1][0] if reviews else None)
     out = [mark_seen(f"{program.name}/{lid}", sig),
-           f"<p class=meta><a href='../../index.html'>← all lines</a></p>",
+           "<p class=meta><a href='../../index.html'>← all lines</a></p>",
            f"<h1>{esc(lid)} · {esc(line.get('name', ''))}</h1>",
-           f"<p>{badge(state_now)}</p>",
-           f"<p class=meta>{esc(line.get('status', ''))} · last heard "
-           f"{esc(when(heard, program.timezone)) if heard else 'never'} · <a href='"
-           f"{esc(discuss_link(program, lid, line.get('name', lid), stem, bool(review)))}'>"
-           "Discuss</a></p>"]
+           f"<p class=now><span class='state state-{esc(key)}'>{esc(label)}</span> {m(detail[:1].upper() + detail[1:])}</p>"]
+    if key == "stuck":
+        out.append("<div class=needs><div class='card bad'>Fix it in the line's worktree, then "
+                   f"<code>program serve --resume {esc(program.name)}:{esc(lid)}</code>"
+                   + form(program, "resume", f"Resume {lid}", lid) + "</div></div>")
+
+    out.append("<h3>What this line is for</h3>")
+    if line.get("purpose"):
+        out.append(f"<p>{m(line['purpose'])}</p>")
+    else:
+        out.append("<p class=none>The agent hasn't written this yet; it will at the line's "
+                   "next run.</p>")
+        if line.get("reason"):
+            out.append(f"<p><span class=meta>Why it was opened:</span> {m(line['reason'])}</p>")
     if line.get("question"):
-        source = f" <span class=meta>({esc(line['question_source'])})</span>" \
-            if line.get("question_source") else ""
-        out += ["<h3>Question</h3>", f"<p>{m(line['question'])}{source}</p>"]
-    links = related(lines, lid, "../")
+        source = esc(line.get("question_source") or "the question it was opened with")
+        out.append(f"<blockquote>{m(line['question'])}<br><span class=meta>{source}</span>"
+                   "</blockquote>")
     out += ["<h3>Where it stands</h3>",
             f"<p>{m(line.get('state', '')) or '<span class=none>not recorded</span>'}</p>",
-            f"<p>{ahead(line, m)}</p>"] + ([f"<p class=meta>Related: {links}</p>"] if links else [])
-    progress = program.repo / "lines" / lid / "progress.md"
-    if progress.is_file():
-        out += ["<h3>Progress notes</h3>", f"<div class=doc>{render_file(progress)}</div>"]
+            f"<p>{ahead(line, m)}</p>"]
     if open_jobs:
-        out += ["<h3>Jobs in flight</h3><ul>"] + [
-            f"<li>{esc(j['experiment_id'])}: job {esc(j['job_id'])} on {esc(j['host'])}, "
-            f"{esc(j.get('state', ''))} {esc(j.get('elapsed', ''))}</li>" for j in open_jobs] + ["</ul>"]
-    if latest:
-        rel, doc = latest
-        out += [f"<h3>Latest run</h3><p><b>{m(doc.get('headline', ''))}</b> "
-                f"<span class=meta>({esc(rel)})</span></p>"]
-        for answer in doc.get("answers", []):
-            out.append(f"<div class=card><b>Asked:</b> {m(answer['asked'])}<br>"
-                       f"<b>{esc(answer['status'])}:</b> {m(answer['answer'])}</div>")
-        for question in doc.get("questions", []):
-            out.append(f"<div class=card><b>Question:</b> {m(question['question'])}<br>"
-                       f"<span class=meta>Why it matters: {m(question['why_it_matters'])}. "
-                       f"If unanswered: {m(question['default_if_unanswered'])}</span>"
-                       + form(program, "instruct", f"Answer {lid}", lid,
-                              "<textarea name=text required placeholder='Your answer'></textarea>",
-                              question=question["question"]) + "</div>")
-    if review:
-        rel, doc = review
-        out += [f"<h3>The checker</h3><p>{m(doc.get('summary', ''))} "
-                f"<span class=meta>({esc(rel)})</span></p>"]
-        for item in doc.get("reviews", []):
-            kind = "good" if item["verdict"] == "holds" else "bad"
-            out.append(f"<div class=card><span class={kind}><b>{esc(item['verdict'])}</b></span>: "
-                       f"{m(item.get('plain_claim', ''))}<br><span class=meta>"
-                       f"{m(item.get('what_would_resolve', ''))}</span></div>")
+        out.append("<p><b>Jobs running:</b> " + "; ".join(
+            f"{esc(j['experiment_id'])} job {esc(j['job_id'])} on {esc(j['host'])} "
+            f"({esc(j.get('state', ''))} {esc(j.get('elapsed', ''))})" for j in open_jobs) + "</p>")
+
+    out.append("<h3>Its latest run</h3>")
+    if not summaries:
+        out.append("<p class=none>No runs yet.</p>")
+    told = [(rel, doc) for rel, doc in reversed(summaries)]
+    earlier = []
+    for index, (rel, doc) in enumerate(told[:6]):
+        name = Path(rel).stem
+        story = run_story(program, m, rel, doc, reviewed.get(name), by_stem.get(name), "../")
+        if index == 0:
+            out.append(f"<div class=card><p class=meta>{esc(name)}</p>{story}</div>")
+        else:
+            check = verdict_counts(reviewed[name][1]) if name in reviewed \
+                else "<span class=warn>not checked</span>"
+            earlier.append(f"<details class=card><summary><span class=meta>{esc(name)}</span> "
+                           f"{esc(mapview.short(doc.get('headline', ''), 150))} · {check}"
+                           f"</summary>{story}</details>")
+
+    turn = your_turn(conn, program, lid, latest)
+    acts = bool(actions.token())
+    out.append("<h3 id=your-turn>Your turn</h3>")
+    if status == "proposed":
+        out.append("<div class='card turn'>The agent proposed this line. It runs only if you "
+                   "make it active.<br>"
+                   + form(program, "line-status", "Make it active", lid, status="active")
+                   + form(program, "line-status", "Drop it", lid, status="dropped") + "</div>")
+    elif status != "active":
+        out.append(f"<p class=none>This line is {esc(status)}; reopen it under More to "
+                   "instruct it.</p>")
+    else:
+        if not turn["questions"] and not turn["others"]:
+            out.append("<p class=meta>The line has no questions for you. Tell it something "
+                       "below if you want, or just press Start.</p>")
+        for number, (question, answer) in enumerate(turn["questions"], 1):
+            box = form(program, "instruct", "Save answer", lid,
+                       "<textarea name=text required placeholder='Your answer. Saving starts "
+                       "nothing.'></textarea>", question=question["question"], anchor="your-turn")
+            head = (f"<b>Question {number} of {len(turn['questions'])}.</b> "
+                    f"{m(question['question'])}<br><span class=meta>Why it matters: "
+                    f"{m(question['why_it_matters'])}<br>If you don't answer: "
+                    f"{m(question['default_if_unanswered'])}</span>")
+            if answer:
+                change = f"<details><summary>Change your answer</summary>{box}</details>" if box else ""
+                out.append(f"<div class='card turn done'>{head}<p class=answered><span class=good>"
+                           f"✓ You answered:</span> {esc(answer['text'])}</p>{change}</div>")
+            else:
+                out.append(f"<div class='card turn'>{head}{box}</div>")
+        if turn["others"]:
+            out.append("<div class='card turn done'><b>Also saved for its next run</b><ul>"
+                       + "".join(f"<li>{esc(e['text'])}" + (
+                           f"<br><span class=meta>in reply to: {esc(e['question'])}</span>"
+                           if e["question"] else "") + "</li>" for e in turn["others"])
+                       + "</ul></div>")
+        more = form(program, "instruct", "Save", lid,
+                    "<textarea name=text required placeholder='Anything else for this line. "
+                    "Saving starts nothing.'></textarea>", anchor="your-turn")
+        if more:
+            out.append(f"<div class=card><b>Anything else?</b>{more}"
+                       f"<p class=meta>Or {discuss}.</p></div>")
+        elif not acts:
+            out.append(f"<p class=meta>This page is read-only. {discuss}.</p>")
+
+    if earlier:
+        out += ["<h3>Earlier runs, newest first</h3>", *earlier]
+
+    out.append("<details class=more><summary>More: documents, earlier runs, notes, pause or "
+               "close</summary>")
+    links = related(lines, lid, "../")
+    out.append(f"<p class=meta>{esc(status)} · last heard "
+               f"{esc(when(heard, program.timezone)) if heard else 'never'}"
+               + (f" · {links}" if links else "") + f" · {discuss}</p>")
     docs = line_documents(program, lid, line)
     out.append("<h3>Documents</h3>")
     if docs:
@@ -773,46 +870,54 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
         out.append("</ul>")
     else:
         out.append("<p class=none>None yet.</p>")
-    out.append("<h3>Recent runs</h3><table><tr><th>Run</th><th>Headline</th></tr>")
-    out += [f"<tr><td>{esc(Path(rel).stem)}</td><td>{m(doc.get('headline', ''))}</td></tr>"
-            for rel, doc in reversed(summaries[-10:])] or [
-        "<tr><td colspan=2 class=none>none yet</td></tr>"]
-    out.append("</table>")
+    progress = program.repo / "lines" / lid / "progress.md"
+    if progress.is_file():
+        out += ["<h3>Progress notes</h3>", f"<div class=doc>{render_file(progress)}</div>"]
+    if len(told) > 6:
+        out.append("<h3>Older runs</h3><table><tr><th>Run</th><th>Headline</th></tr>")
+        out += [f"<tr><td><a href='../docs/{esc(rel)}.html'>{esc(Path(rel).stem)}</a></td>"
+                f"<td>{m(doc.get('headline', ''))}</td></tr>" for rel, doc in told[6:]]
+        out.append("</table>")
     failed = [r for r in runs[:10] if json.loads(r["problems"] or "[]")]
     if failed:
         out.append("<h3>Service runs with problems</h3><ul>")
         out += [f"<li>{esc(r['stem'])}: {esc('; '.join(json.loads(r['problems'])))}</li>"
                 for r in failed]
         out.append("</ul>")
-    told = instruction_status(conn, program, lid, "../")
-    if told:
-        out += ["<h3>Your latest instruction</h3>", f"<p>{told}</p>"]
-    instruct = form(program, "instruct", f"Instruct {lid}", lid,
-                    "<textarea name=text required placeholder='An instruction for this line; it is "
-                    "added to the line&#39;s instruction file; nothing runs until you press Start'></textarea>")
-    if instruct:
-        out += ["<h3>Instruct this line</h3>",
-                "<p class=meta>Answers and instructions are saved to the line and start nothing. "
-                "When you've said everything, press Start: the line runs next.</p>", instruct]
-        if line.get("status", "active") == "active" and state_now[0] not in ("running", "stuck"):
-            out.append(form(program, "start", f"Start {lid}", lid))
-    now_is = line.get("status", "active")
-    why = "<textarea name=comment required placeholder='Why? Saved as your note on the line'></textarea>"
-    changes = {"active": [("closed", f"Close {lid}", why), ("paused", f"Pause {lid}", why)],
-               "paused": [("active", f"Resume {lid} (make it active)", ""),
-                          ("closed", f"Close {lid}", why)],
-               "closed": [("active", f"Reopen {lid}", "")],
-               "dropped": [("active", f"Reopen {lid}", "")],
-               "proposed": [("active", "Make it active", ""), ("dropped", "Drop it", "")]}
-    forms = [form(program, "line-status", button, lid, fields, status=status)
-             for status, button, fields in changes.get(now_is, [])]
-    if any(forms):
-        out += [f"<h3>This line is {esc(now_is)}</h3>", *forms]
     if line.get("notes"):
         out.append("<h3>Notes</h3>")
         out += [f"<div class=card><span class=meta>{esc(n.get('night', n['at'][:10]))}, "
                 f"{esc(n['by'])}</span><br>{m(n.get('text', ''))}</div>"
                 for n in reversed(line["notes"][-8:])]
+    why = "<textarea name=comment required placeholder='Why? Saved as your note on the line'></textarea>"
+    changes = {"active": [("closed", f"Close {lid}", why), ("paused", f"Pause {lid}", why)],
+               "paused": [("active", f"Resume {lid} (make it active)", ""),
+                          ("closed", f"Close {lid}", why)],
+               "closed": [("active", f"Reopen {lid}", "")],
+               "dropped": [("active", f"Reopen {lid}", "")]}
+    forms = [form(program, "line-status", button, lid, fields, status=to)
+             for to, button, fields in changes.get(status, [])]
+    if any(forms):
+        out += [f"<h3>This line is {esc(status)}</h3>", *forms]
+    out.append("</details>")
+
+    if status == "active":
+        can_start = acts and key not in ("running", "stuck") and label != "Starting"
+        if key == "you" or key == "idle":
+            asked, answered = len(turn["questions"]), turn["answered"]
+            saying = []
+            if asked:
+                saying.append(f"{answered} of {plural(asked, 'question')} answered")
+            if turn["others"]:
+                saying.append(f"{plural(len(turn['others']), 'instruction')} saved")
+            text = (", ".join(saying) or "Nothing new from you") + ". " + (
+                "Unanswered questions take the default shown. " if asked > answered else "") \
+                + "Nothing runs until you press Start."
+        else:
+            text = f"{label}: {detail}" if detail else label
+        out.append(f"<div class=bar><div class=bar-in><span>{esc(text)}</span>"
+                   + (form(program, "start", f"Start {lid}", lid) if can_start else "")
+                   + "</div></div>")
     return page(f"{lid} · {line.get('name', '')}", "\n".join(out))
 
 
@@ -841,7 +946,9 @@ def write_program_pages(folder: Path, conn: sqlite3.Connection, program: Program
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(line_page(conn, program, lid, line, sessions.get(lid, []),
                                     reviews.get(lid, []), notes, lines, m))
-        for rel, _ in line_documents(program, lid, line):
+        kept = [rel for rel, _ in line_documents(program, lid, line)]
+        kept += [rel for rel, _ in sessions.get(lid, []) + reviews.get(lid, [])]
+        for rel in kept:
             if is_repo_file(program, rel):
                 used.setdefault(rel, []).append(lid)
     for rel, lids in used.items():
@@ -867,10 +974,9 @@ def write(state: Path, conn: sqlite3.Connection, programs: list[Program],
     text = page("RoboRobo service",
                 "<h1>RoboRobo service</h1>"
                 f"<p class=meta>Last look {datetime.now(ZoneInfo(programs[0].timezone) if programs else None):%b %-d, %H:%M %Z}. "
-                "This page refreshes every minute. A line's name opens its page, and "
-                "<span class=new>new</span> marks lines that changed since you last opened "
-                "theirs; Discuss "
-                "opens a Claude Code thread in your clone.</p>" + "\n".join(sections),
+                "This page refreshes every minute. Each line's page has its story, its questions "
+                "for you and its Start button; <span class=new>new</span> marks lines that "
+                "changed since you last opened theirs.</p>" + "\n".join(sections),
                 refresh=True)
     path = folder / "index.html"
     path.write_text(text)
@@ -905,7 +1011,9 @@ class QuietHandler(SimpleHTTPRequestHandler):
             rerender(self.state, self.repos)
             back = urlsplit(self.headers.get("Referer", "")).path or "/index.html"
             self.send_response(303)
-            self.send_header("Location", f"{back}?{urlencode({'said': said})}")
+            anchor = fields.get("anchor", "")
+            mark = f"#{anchor}" if re.fullmatch(r"[\w-]+", anchor) else ""
+            self.send_header("Location", f"{back}?{urlencode({'said': said})}{mark}")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return

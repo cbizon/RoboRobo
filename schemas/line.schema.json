@@ -17,6 +17,7 @@
     "parent": {"$ref": "_common.schema.json#/$defs/id", "description": "The line this one branched from"},
     "night": {"type": "string", "format": "date", "description": "The session date a note is about, or the night an open or update belongs to"},
     "status": {"enum": ["proposed", "active", "paused", "closed", "dropped"], "description": "A line the agent opens starts proposed and runs only once the scientist makes it active"},
+    "purpose": {"$ref": "_common.schema.json#/$defs/text", "description": "What the line is for, in two to four plain sentences for someone who wasn't there: what it is trying to find out or build, why the program needs that, and how it differs from the lines near it. Kept current as the line's aim changes"},
     "state": {"$ref": "_common.schema.json#/$defs/text", "description": "Where the line stands now, for someone who reads nothing else"},
     "next": {"$ref": "_common.schema.json#/$defs/text", "description": "What the line does next, or what it is waiting for (a job, an answer, another line)"},
     "closes_when": {"$ref": "_common.schema.json#/$defs/text", "description": "What result or decision would close the line, and what would keep it going"},
