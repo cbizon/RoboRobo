@@ -13,7 +13,9 @@ the line is for and what happens next.
 
 Each line has a page (``<program>/lines/<line>.html``) meant to be read top
 to bottom: its state in a sentence; what it is for (the agent's ``purpose``,
-then the scientist's own words); where it stands; its latest run, with the
+then the scientist's own words); where it stands; its pinned items (what it
+always keeps current: an algorithm, a diagram), each with its earlier
+versions a click away; its latest run, with the
 checker's view of it or why it wasn't checked; the scientist's turn (each
 question of that run with its context, collapsing to the answer once
 answered, and a box for anything else); earlier runs. A bar fixed to the
@@ -45,7 +47,7 @@ import markdown
 
 from roborobo import actions, cluster, mapview
 from roborobo.config import Program
-from roborobo.gitutil import committed_at
+from roborobo.gitutil import committed_at, git, show
 from roborobo.mapview import fold_lines
 from roborobo.records import documents, load_ledger
 
@@ -104,6 +106,12 @@ details summary { cursor: pointer; } details[open] summary { color: var(--muted)
 div.doc { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 4px 18px; overflow-x: auto; }
 div.doc table { width: auto; } pre { white-space: pre-wrap; word-break: break-word; }
+.pinbox { max-height: 520px; overflow: auto; border-top: 1px solid var(--line); margin-top: 8px;
+  padding-top: 4px; }
+.pin-img { max-width: 100%; height: auto; display: block; }
+.pin-nav { font-size: 1.05rem; } .pin-nav b { margin: 0 14px; }
+form.act input[name=title] { display: block; box-sizing: border-box; width: 100%; font: inherit;
+  margin-bottom: 4px; padding: 4px 6px; }
 .said { position: sticky; top: 8px; z-index: 2; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
 .row { background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
   padding: 10px 14px; margin: 6px 0; }
@@ -511,6 +519,83 @@ def render_file(path: Path) -> str:
     return f"<pre>{esc(text)}</pre>"
 
 
+PIN_KINDS = (".md", ".txt", ".svg", ".png", ".jpg")
+
+
+def pin_file(program: Program, lid: str, slug: str) -> str | None:
+    """Where a pinned item's file is, if the line has made it."""
+    for kind in PIN_KINDS:
+        rel = f"lines/{lid}/pinned/{slug}{kind}"
+        if (program.repo / rel).is_file():
+            return rel
+    return None
+
+
+def pin_versions(program: Program, rel: str) -> list[tuple[str, int, str]]:
+    """Every version of a pinned file, oldest first: (commit, when, what the
+    commit said changed). Main's own history, so a line's work counts from
+    when it was merged."""
+    out = git(program.repo, "log", "--first-parent", "--reverse", "--format=%H%x09%ct%x09%s",
+              "HEAD", "--", rel, check=False)
+    return [(sha, int(at), subject) for sha, at, subject in
+            (row.split("\t", 2) for row in out.splitlines() if row.strip())]
+
+
+def pin_body(raw: bytes, kind: str, image: str) -> str:
+    """A pinned file's contents as HTML; an image is shown from ``image``."""
+    if kind in (".svg", ".png", ".jpg"):
+        return f"<img class=pin-img src='{esc(image)}' alt=''>"
+    text = raw.decode(errors="replace")
+    return render_markdown(text) if kind == ".md" else f"<pre>{esc(text)}</pre>"
+
+
+def pin_block(program: Program, lid: str, pin: dict, m: Marks) -> str:
+    """A pinned item on its line's page: the latest version, and the way to
+    the earlier ones."""
+    head = f"<b>{esc(pin['title'])}</b>"
+    rel = pin_file(program, lid, pin["slug"])
+    versions = pin_versions(program, rel) if rel else []
+    if not versions:
+        return (f"<div class=card>{head}<p class=none>Not made yet: the line makes it at its "
+                f"next run.</p><p class=meta>It must show: {m(pin['about'])}</p></div>")
+    count, kind = len(versions), Path(rel).suffix
+    folder = f"../pins/{esc(lid)}/{esc(pin['slug'])}"
+    earlier = f" · <a href='{folder}/{count - 1}.html'>← previous version</a>" if count > 1 else ""
+    return (f"<div class=card>{head} <span class=meta>version {count} of {count}, "
+            f"{esc(when(versions[-1][1], program.timezone))}{earlier} · "
+            f"<a href='{folder}/{count}.html'>on its own page</a></span>"
+            f"<div class=pinbox>{pin_body((program.repo / rel).read_bytes(), kind, f'{folder}/{count}{kind}')}"
+            "</div></div>")
+
+
+def write_pins(base: Path, program: Program, lid: str, line: dict) -> None:
+    """A page per version of each pinned item, each linked to the one before
+    and after. Written again only when a new version appears."""
+    for slug, pin in line.get("pinned", {}).items():
+        rel = pin_file(program, lid, slug)
+        versions = pin_versions(program, rel) if rel else []
+        folder = base / "pins" / lid / slug
+        if not versions or (folder / f"{len(versions)}.html").exists():
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        count, kind = len(versions), Path(rel).suffix
+        for number, (sha, at, subject) in enumerate(versions, 1):
+            raw = show(program.repo, sha, rel) or b""
+            if kind in (".svg", ".png", ".jpg"):
+                (folder / f"{number}{kind}").write_bytes(raw)
+            older = f"<a href='{number - 1}.html'>← earlier</a>" if number > 1 \
+                else "<span class=none>← earlier</span>"
+            newer = f"<a href='{number + 1}.html'>later →</a>" if number < count \
+                else "<span class=none>later →</span>"
+            body = (f"<p class=meta><a href='../../../lines/{esc(lid)}.html'>← {esc(lid)} "
+                    f"{esc(line.get('name', ''))}</a></p><h1>{esc(pin['title'])}</h1>"
+                    f"<p class=pin-nav>{older} <b>Version {number} of {count}</b>, "
+                    f"{esc(when(at, program.timezone))} {newer}</p>"
+                    f"<p class=meta>What changed: {esc(subject)}</p>"
+                    f"<div class=doc>{pin_body(raw, kind, f'{number}{kind}')}</div>")
+            (folder / f"{number}.html").write_text(page(f"{pin['title']} · {lid}", body))
+
+
 def line_documents(program: Program, lid: str, line: dict) -> list[tuple[str, str]]:
     """(path, kind) for every file the line keeps or its records point to.
     Code branches and other things that aren't files come back with kind and
@@ -787,6 +872,10 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
             f"{esc(j['experiment_id'])} job {esc(j['job_id'])} on {esc(j['host'])} "
             f"({esc(j.get('state', ''))} {esc(j.get('elapsed', ''))})" for j in open_jobs) + "</p>")
 
+    if line.get("pinned"):
+        out.append("<h3>Always on this line</h3>")
+        out += [pin_block(program, lid, pin, m) for pin in line["pinned"].values()]
+
     out.append("<h3>Its latest run</h3>")
     if not summaries:
         out.append("<p class=none>No runs yet.</p>")
@@ -899,6 +988,16 @@ def line_page(conn: sqlite3.Connection, program: Program, lid: str, line: dict,
              for to, button, fields in changes.get(status, [])]
     if any(forms):
         out += [f"<h3>This line is {esc(status)}</h3>", *forms]
+    pinning = form(program, "pin", "Pin it", lid,
+                   "<input name=title required maxlength=80 placeholder='What to pin, for "
+                   "example: Current algorithm (pseudocode)'>"
+                   "<textarea name=about required placeholder='What it must show. The line makes "
+                   "it at its next run, keeps it current, and its earlier versions stay "
+                   "readable.'></textarea>")
+    if pinning:
+        out += ["<h3>Pin something to this line</h3>", pinning]
+        out += [form(program, "unpin", f"Unpin {pin['title']}", lid, slug=slug)
+                for slug, pin in line.get("pinned", {}).items()]
     out.append("</details>")
 
     if status == "active":
@@ -946,6 +1045,7 @@ def write_program_pages(folder: Path, conn: sqlite3.Connection, program: Program
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(line_page(conn, program, lid, line, sessions.get(lid, []),
                                     reviews.get(lid, []), notes, lines, m))
+        write_pins(base, program, lid, line)
         kept = [rel for rel, _ in line_documents(program, lid, line)]
         kept += [rel for rel, _ in sessions.get(lid, []) + reviews.get(lid, [])]
         for rel in kept:

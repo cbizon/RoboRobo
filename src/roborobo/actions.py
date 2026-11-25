@@ -13,6 +13,9 @@ repository lock, then pushed:
 - ``instruct``: add to a line's own instruction
   (``lines/<line>/instruction.md``); answering one of a run's questions is an
   instruction that quotes the question. Nothing starts yet;
+- ``pin``: name something the line must always keep current and show (its
+  current algorithm, its phase diagram); the line makes it at its next run;
+  ``unpin`` takes it off;
 - ``start``: the scientist has said everything; the line runs next, whatever
   its daily limit or gap. Until then the line's automatic runs wait too;
 - ``resume``: let a paused program or line run again.
@@ -155,6 +158,42 @@ def instruct(program: Program, lid: str, text: str, question: str = "") -> str:
             f"on {lid} when it's ready to go.")
 
 
+def pin(program: Program, lid: str, title: str, about: str, slug: str = "",
+        removed: bool = False) -> str:
+    """Pin something to a line, or (removed) take it off. The file itself is
+    the line's to make: lines/<line>/pinned/<slug>.<ext>."""
+    line = line_of(program, lid)
+    title, about = (title or "").strip(), (about or "").strip()
+    if removed:
+        if slug not in line.get("pinned", {}):
+            raise Refused(f"{lid} has nothing pinned as {slug!r}")
+        item = {**line["pinned"][slug], "removed": True}
+    else:
+        if not title or not about:
+            raise Refused("give it a title and say what it must show")
+        if len(title) > 80 or len(about) > MAX_TEXT:
+            raise Refused("that is too long")
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        if not slug:
+            raise Refused("the title needs some letters or digits")
+        item = {"slug": slug, "title": title, "about": about}
+    at = now(program)
+    record = {"record": "update", "line_id": lid, "at": at.isoformat(), "by": "human",
+              "night": at.date().isoformat(), "pinned": [item]}
+    errors = schema_errors(record, "line.schema.json")
+    if errors:
+        raise Refused("that doesn't fit a line record: " + "; ".join(errors))
+    with (program.repo / "ledger" / "lines.jsonl").open("a") as ledger:
+        ledger.write(json.dumps(record) + "\n")
+    did = "unpinned from" if removed else "pinned to"
+    commit(program, ["ledger/lines.jsonl"],
+           f"{item['title']!r} {did} {lid} by {program.scientist}, from the dashboard")
+    if removed:
+        return f"{item['title']!r} is no longer pinned to {lid}. Its file and history stay."
+    return (f"{title!r} is pinned to {lid}. The line makes it at its next run and keeps it "
+            f"current from then on; press Start on {lid} to run it now.")
+
+
 def start(state: Path, program: Program, lid: str) -> str:
     """Start: everything the scientist wants to say to the line is said."""
     from roborobo import service
@@ -207,6 +246,10 @@ def perform(state: Path, repos: list[Path], form: dict[str, str]) -> str:
                             form.get("question", ""))
         elif action == "resume":
             said = resume(state, program, form.get("line", ""))
+        elif action == "pin":
+            said = pin(program, form.get("line", ""), form.get("title", ""), form.get("about", ""))
+        elif action == "unpin":
+            said = pin(program, form.get("line", ""), "", "", form.get("slug", ""), removed=True)
         elif action == "start":
             said = start(state, program, form.get("line", ""))
         else:

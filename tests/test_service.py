@@ -1032,3 +1032,59 @@ def test_a_line_page_tells_the_lines_story_and_answers_collapse(served, tmp_path
     look(served, db)
     assert runs(db) == []  # still nothing runs until Start
 
+
+
+def test_a_line_keeps_pinned_items_with_their_earlier_versions(served, tmp_path, acting):
+    """Chris, Nov 25: "on L0009 the thing that keeps changing is the algorithm.
+    So there should be an artifact that is the pseudocode for the current
+    algorithm. It should have a previous/next so I can see how it evolves."""
+    db = conn(tmp_path)
+    code, said = acting(action="pin", line="L0001", title="Current algorithm (pseudocode)",
+                        about="Every step of the heater test, in order.")
+    assert code == 200 and "is pinned to L0001. The line makes it at its next run" in said
+    record = json.loads((served / "ledger" / "lines.jsonl").read_text().splitlines()[-1])
+    assert record["by"] == "human" and record["pinned"] == [
+        {"slug": "current-algorithm-pseudocode", "title": "Current algorithm (pseudocode)",
+         "about": "Every step of the heater test, in order."}]
+    assert run("check", "--repo", served) == 0
+    page = line_page_of(tmp_path, "L0001")
+    assert "<h3>Always on this line</h3>" in page and "Not made yet" in page
+    assert page.index("<h3>Always on this line</h3>") < page.index("<h3>Its latest run</h3>")
+    assert "<button>Unpin Current algorithm (pseudocode)</button>" in page
+    code, said = acting(action="pin", line="L0001", title="???", about="x")
+    assert code == 403
+
+    pinned = served / "lines" / "L0001" / "pinned"
+    pinned.mkdir(parents=True)
+    for text in ("1. Heat.\n", "1. Heat.\n2. Wait.\n", "1. Heat slowly.\n2. Wait.\n"):
+        (pinned / "current-algorithm-pseudocode.md").write_text("# Algorithm\n\n" + text)
+        commit(served, f"algorithm: {text.splitlines()[-1]}")
+    append(served, "lines.jsonl", line("L0001", "update", pinned=[
+        {"slug": "drift-plot", "title": "Drift plot", "about": "Drift against time."}]))
+    (pinned / "drift-plot.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>")
+    commit(served, "a plot, pinned by the agent")
+    dashboard_page(served, tmp_path, db)
+    page = line_page_of(tmp_path, "L0001")
+    assert "version 3 of 3" in page and "Heat slowly." in page and "Not made yet" not in page
+    assert "<a href='../pins/L0001/current-algorithm-pseudocode/2.html'>← previous version</a>" in page
+    assert "<img class=pin-img src='../pins/L0001/drift-plot/1.svg'" in page
+    folder = tmp_path / "state" / "dashboard" / "demo" / "pins" / "L0001"
+    first = (folder / "current-algorithm-pseudocode" / "1.html").read_text()
+    second = (folder / "current-algorithm-pseudocode" / "2.html").read_text()
+    assert "<b>Version 1 of 3</b>" in first and "<li>Heat.</li>" in first and "Wait." not in first
+    assert "<span class=none>← earlier</span>" in first and "<a href='2.html'>later →</a>" in first
+    assert "<a href='1.html'>← earlier</a>" in second and "<a href='3.html'>later →</a>" in second
+    assert "What changed: algorithm: 2. Wait." in second
+    assert (folder / "drift-plot" / "1.svg").read_text().startswith("<svg")
+
+    (pinned / "current-algorithm-pseudocode.md").write_text("# Algorithm\n\n1. Heat.\n2. Cool.\n")
+    commit(served, "algorithm: cool at the end")
+    dashboard_page(served, tmp_path, db)
+    third = (folder / "current-algorithm-pseudocode" / "3.html").read_text()
+    assert "<b>Version 3 of 4</b>" in third and "<a href='4.html'>later →</a>" in third
+
+    code, said = acting(action="unpin", line="L0001", slug="drift-plot")
+    assert code == 200 and "no longer pinned" in said
+    assert "Drift plot" not in line_page_of(tmp_path, "L0001")
+    assert (pinned / "drift-plot.svg").exists()  # unpinning deletes nothing
+    assert run("check", "--repo", served) == 0
