@@ -31,7 +31,7 @@ def fold_lines(records: list[dict]) -> dict[str, dict]:
     for record in records:
         line = lines.setdefault(record["line_id"], {
             "id": record["line_id"], "status": "active", "feeds": [], "arts": [],
-            "placed": {}, "notes": []})
+            "placed": {}, "notes": [], "pinned": {}})
         if record["record"] == "open":
             line["by"] = record["by"]
             line["opened"] = record.get("night", record["at"][:10])
@@ -43,6 +43,11 @@ def fold_lines(records: list[dict]) -> dict[str, dict]:
             pair = [artifact["kind"], artifact["path"]]
             if pair not in line["arts"]:
                 line["arts"].append(pair)
+        for pin in record.get("pinned", []):
+            if pin.get("removed"):
+                line["pinned"].pop(pin["slug"], None)
+            else:
+                line["pinned"][pin["slug"]] = pin
         for placed in record.get("experiments", []):
             line["placed"][placed["experiment_id"]] = placed.get("title")
         if record["record"] == "note":

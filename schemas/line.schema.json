@@ -21,6 +21,21 @@
     "state": {"$ref": "_common.schema.json#/$defs/text", "description": "Where the line stands now, for someone who reads nothing else"},
     "next": {"$ref": "_common.schema.json#/$defs/text", "description": "What the line does next, or what it is waiting for (a job, an answer, another line)"},
     "closes_when": {"$ref": "_common.schema.json#/$defs/text", "description": "What result or decision would close the line, and what would keep it going"},
+    "pinned": {
+      "type": "array",
+      "description": "Things this line always keeps current and shows first: its current algorithm, its phase diagram, its amplitude plot. Each lives in one file, lines/<line>/pinned/<slug>.<md|svg|png|jpg|txt>, rewritten in place whenever what it shows changes; the dashboard shows the latest and every earlier version from the file's history. A record with a slug already pinned replaces its title and description; `removed` unpins it.",
+      "items": {
+        "type": "object",
+        "required": ["slug", "title", "about"],
+        "properties": {
+          "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "The file's name without its extension"},
+          "title": {"type": "string", "minLength": 1},
+          "about": {"$ref": "_common.schema.json#/$defs/text", "description": "What it must show, so whoever makes it knows when it is right"},
+          "removed": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
     "feeds": {"type": "array", "items": {"$ref": "_common.schema.json#/$defs/id"}, "description": "Lines that use this line's result"},
     "artifacts": {
       "type": "array",

@@ -4,6 +4,23 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-25 (pinned items: what a line always shows)
+
+Chris: "on L0009 the thing that keeps changing is the algorithm. So there
+should be an artifact that is the pseudocode for the current algorithm,
+with a previous/next so I can see how it evolves. For the phase diagrams,
+the phase diagram."
+
+- A line record can carry `pinned` items (slug, title, what it must show).
+  Each is one file, `lines/<line>/pinned/<slug>.<md|txt|svg|png|jpg>`, that
+  the line rewrites in place whenever what it shows changes.
+- Earlier versions come from the file's git history, not from dated copies:
+  nothing extra to record, and a version can't be forgotten. The dashboard
+  shows the latest on the line's page, above its latest run, and a page per
+  version with earlier/later links and what the commit said changed.
+- Pin and Unpin are dashboard actions (under More on a line's page); the
+  agent can pin too. Unpinning deletes nothing.
+
 ## 2026-11-24 (the dashboard, rethought around one line's story)
 
 Chris: answering on the front page had no context; answered boxes stayed
