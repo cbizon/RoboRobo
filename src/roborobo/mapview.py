@@ -36,7 +36,7 @@ def fold_lines(records: list[dict]) -> dict[str, dict]:
             line["by"] = record["by"]
             line["opened"] = record.get("night", record["at"][:10])
         for key in ("name", "question", "question_source", "reason", "parent",
-                    "status", "state", "next", "closes_when", "feeds"):
+                    "status", "state", "purpose", "next", "closes_when", "feeds"):
             if key in record and record["record"] != "note":
                 line[key] = record[key]
         for artifact in record.get("artifacts", []):

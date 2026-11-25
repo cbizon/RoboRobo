@@ -4,6 +4,27 @@ Changes to RoboRobo, newest first, with the program that prompted each.
 When a program needs something done by hand, decide whether it's general;
 if it is, it goes here first and reaches the program through `program sync`.
 
+## 2026-11-24 (the dashboard, rethought around one line's story)
+
+Chris: answering on the front page had no context; answered boxes stayed
+and the answers vanished; nothing said whether a line would run; a line's
+"question" was a mnemonic for a lost conversation; no word from the checker.
+
+- The home page is a list. Lines are grouped by state (stopped, waiting on
+  you, running, queued, idle), each with what it is for and what happens
+  next. Nothing is answered there.
+- A line's page reads top to bottom: its state in a sentence, what it is
+  for, where it stands, its latest run with the checker's view (or "not
+  checked" and why), your turn, earlier runs. The rest is under More.
+- Each question sits with its context and collapses to "You answered" once
+  answered, matched against the line's instruction file. A bar fixed to the
+  foot of the window says what is saved and holds Start, the only thing
+  that runs the line.
+- Lines have a `purpose`: the agent's plain account of what the line is
+  for. The scientist's own words stay as the `question`, quoted under it.
+- The agent's replies and the checker's verdicts are labelled as whose
+  they are. Instruction entries are timed to the second.
+
 ## 2026-11-24 (dashboard buttons that did nothing)
 
 - The dashboard asked for its token in a browser pop-up. Some browsers

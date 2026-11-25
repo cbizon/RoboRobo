@@ -346,15 +346,16 @@ def test_the_dashboard_shows_what_needs_you_and_each_line(served, tmp_path):
     day = instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     look(served, db)
     page = dashboard_page(served, tmp_path, db)
-    assert ("<b><a class=line href='demo/lines/L0002.html' title='Spare heater'>L0002</a> "
-            "proposed</b> by the agent: Spare heater. One is one sample.") in page
-    assert "<a href='demo/lines/L0001.html'><b>L0001</b></a><span class=new hidden>new</span><br>Heater" in page
-    assert "<a href='demo/lines/L0003.html'><b>L0003</b></a><span class=new hidden>new</span><br>Fan" in page
-    hidden = page.split("data-line='demo/L0002'")[1].split(">")[0]
-    assert "class=inactive hidden" in hidden  # other lines are there, behind the toggle
-    assert "Show the 1 paused, closed, dropped and proposed lines</label>\n<table>" in page
-    assert f"{day}-L0001" in page and "A quiet run." in page and "no claims" in page
-    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", page).group(1))
+    assert "<form" not in page and "<textarea" not in page  # a list: nothing is answered here
+    waiting = page.split("<h3>Waiting on you (1)</h3>")[1].split("<h3>")[0]
+    assert "<b>L0002</b> · Spare heater</a>" in waiting and "Proposed by the agent" in waiting
+    assert "<a href='demo/lines/L0001.html'><b>L0001</b> · Heater</a><span class=new hidden>new</span>" in page
+    assert "<a href='demo/lines/L0003.html'><b>L0003</b> · Fan</a><span class=new hidden>new</span>" in page
+    assert f"Last run {day}: checker" in row(page, "L0001") and "no claims" in row(page, "L0001")
+    heater = line_page_of(tmp_path, "L0001")
+    assert f"{day}-L0001" in heater and "A quiet run." in heater
+    assert "Nothing to check." in heater  # the checker's view of that run, on the line's page
+    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", heater).group(1))
     query = parse_qs(urlparse(link).query)
     assert query["folder"] == [str(served)]
     assert "Run `git pull` first" in query["q"][0]
@@ -369,7 +370,9 @@ def test_the_dashboard_shows_a_pause_with_how_to_resume(served, tmp_path, monkey
     instruct(served, "## L0001 Heater\n\n1. Is it the heater?\n")
     look(served, db)
     page = dashboard_page(served, tmp_path, db, ["job problem: E0001 job 7 ended FAILED"])
-    assert "title='Heater'>L0001</a> paused</b>" in page and "program serve --resume demo:L0001" in page
+    assert "Stopped: needs fixing" in row(page, "L0001")
+    assert "<h3>Stopped: needs fixing (1)</h3>" in page
+    assert "program serve --resume demo:L0001" in line_page_of(tmp_path, "L0001")
     assert "job problem: E0001 job 7 ended FAILED" in page
 
 
@@ -409,11 +412,19 @@ def test_questions_answered_by_a_later_instruction_are_not_shown(served, tmp_pat
     (served / "sessions" / "2026-11-17-L0001.json").write_text(json.dumps(asked))
     commit(served, "a run that asks")
     db = conn(tmp_path)
-    assert "Should the heater go higher?" in dashboard_page(served, tmp_path, db)
+    index = dashboard_page(served, tmp_path, db)
+    assert "Should the heater go higher?" not in index  # questions are on the line's page only
+    assert "0 of 1 question answered" in row(index, "L0001")
+    asks = line_page_of(tmp_path, "L0001")
+    assert "<b>Question 1 of 1.</b> Should the heater go higher?" in asks
+    assert "Why it matters: It decides the next run." in asks
+    assert "If you don&#x27;t answer: Keep it where it is." in asks or \
+        "If you don't answer: Keep it where it is." in asks
     import time
     time.sleep(1.1)  # commit times are in whole seconds
     instruct(served, "## L0001 Heater\n\n1. Yes, higher.\n")
-    assert "Should the heater go higher?" not in dashboard_page(served, tmp_path, db)
+    dashboard_page(served, tmp_path, db)
+    assert "<b>Question 1 of 1.</b>" not in line_page_of(tmp_path, "L0001")
 
 
 def test_each_line_has_a_page_with_its_documents(served, tmp_path):
@@ -434,13 +445,13 @@ def test_each_line_has_a_page_with_its_documents(served, tmp_path):
     commit(served, "a line with documents")
     db = conn(tmp_path)
     index = dashboard_page(served, tmp_path, db)
-    assert "<details><summary>" in index and long_state.strip() in index  # folded, not cut
-    assert "<b>Next:</b> <span class=none>not recorded</span>" in index
-    assert "(today)" in index.split("lines/L0001.html")[1].split("</tr>")[0]  # last heard
+    assert "(today)" in row(index, "L0001")  # last heard
 
     folder = tmp_path / "state" / "dashboard" / "demo"
     line_page = (folder / "lines" / "L0001.html").read_text()
     assert "<h1>L0001 · Heater</h1>" in line_page
+    assert long_state.strip() in line_page  # in full, not cut
+    assert "<b>Next:</b> <span class=none>not recorded</span>" in line_page
     assert "<strong>Done:</strong> the heater test." in line_page  # progress, rendered
     assert "href='../docs/lines/L0001/design.md.html'" in line_page
     assert "href='../docs/evidence/E0001.json.html'" in line_page
@@ -459,8 +470,7 @@ def test_a_quiet_line_is_marked(served, tmp_path):
                                        text="A note from long ago."))
     commit(served, "an old note")
     page = dashboard_page(served, tmp_path, conn(tmp_path))
-    row = page.split("lines/L0003.html")[1].split("</tr>")[0]
-    assert "class=warn" in row and "days ago" in row
+    assert "class=warn" in row(page, "L0003") and "days ago" in row(page, "L0003")
 
 
 def test_lists_right_after_a_paragraph_render_as_lists():
@@ -587,14 +597,14 @@ def test_lines_changed_since_their_page_was_opened_are_marked(served, tmp_path):
     import re
     db = conn(tmp_path)
     index = dashboard_page(served, tmp_path, db)
-    row_sig = re.search(r"<tr data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", index).group(1)
+    row_sig = re.search(r"<div class='row' data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", index).group(1)
     assert "<span class=new hidden>new</span>" in index and "localStorage.getItem" in index
     line_page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
     assert f'localStorage.setItem("roborobo:demo/L0001", "{row_sig}")' in line_page  # opening it marks it seen
     append(served, "lines.jsonl", line("L0001", "update", state="The heater is ruled out now."))
     commit(served, "news")
     changed = dashboard_page(served, tmp_path, db)
-    assert re.search(r"<tr data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", changed).group(1) != row_sig
+    assert re.search(r"<div class='row' data-line='demo/L0001' data-sig='([0-9a-f]{16})'>", changed).group(1) != row_sig
 
 
 # The dashboard's actions: forms on the page, sent with the scientist's token.
@@ -656,9 +666,10 @@ def test_without_a_token_configured_the_page_is_read_only(served, tmp_path, monk
 
 
 def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
-    page = dashboard_page(served, tmp_path, conn(tmp_path))
+    index = dashboard_page(served, tmp_path, conn(tmp_path))
+    page = line_page_of(tmp_path, "L0002")
     assert "<button>Make it active</button>" in page and "<button>Drop it</button>" in page
-    assert TOKEN not in page  # the token is never written into the page
+    assert TOKEN not in page + index  # the token is never written into the page
     code, said = acting(action="line-status", line="L0002", status="active")
     assert code == 200 and "L0002 is made active." in said
     record = json.loads((served / "ledger" / "lines.jsonl").read_text().splitlines()[-1])
@@ -674,8 +685,8 @@ def test_approve_a_proposed_line_from_the_dashboard(served, tmp_path, acting):
 def test_resume_a_paused_line_from_the_dashboard(served, tmp_path, acting):
     db = conn(tmp_path)
     service.pause_line(db, config.load(served), "L0001", "a merge conflicted")
-    page = dashboard_page(served, tmp_path, db)
-    assert "<button>Resume L0001</button>" in page
+    dashboard_page(served, tmp_path, db)
+    assert "<button>Resume L0001</button>" in line_page_of(tmp_path, "L0001")
     code, said = acting(action="resume", line="L0001")
     assert code == 200 and "demo:L0001 is resumed" in said
     assert db.execute("SELECT COUNT(*) FROM paused_lines").fetchone()[0] == 0
@@ -687,7 +698,7 @@ def test_a_line_page_has_an_instruction_box(served, tmp_path, monkeypatch):
     monkeypatch.setenv("ROBOROBO_DASHBOARD_TOKEN", TOKEN)
     dashboard_page(served, tmp_path, conn(tmp_path))
     page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
-    assert "<button>Instruct L0001</button>" in page and 'localStorage.getItem("roborobo:token")' in page
+    assert "<button>Save</button>" in page and "Saving starts nothing." in page and 'localStorage.getItem("roborobo:token")' in page
     assert "prompt(" not in page and "token-ask" in page  # asked for in the page, not a pop-up
 
 
@@ -754,14 +765,14 @@ def test_terms_lines_and_documents_are_linked_where_they_are_mentioned(served, t
     assert "<a class=doc href='demo/docs/lines/L0001/design.md.html' title='lines/L0001/design.md'>design.md</a>" in index
     assert "<a class=line href='demo/lines/L0003.html' title='Fan'>L0003</a>" in index
     assert "<b>Next:</b> Wait for the Fan line" in index
-    assert "<b>Closes when:</b> The drift is explained" in index
-    assert "branches: <a class=line href='demo/lines/L0003.html'>L0003 Fan</a>" in index
     assert "href='demo/terms.html'>terms</a>" in index
     folder = tmp_path / "state" / "dashboard" / "demo"
     terms = (folder / "terms.html").read_text()
     assert "id='T0001'><b>Impulse step</b>" in terms and "also: impulse-step method" in terms
     line_page = (folder / "lines" / "L0001.html").read_text()
-    assert "href='../terms.html#T0001'" in line_page and "<b>Closes when:</b>" in line_page
+    assert "href='../terms.html#T0001'" in line_page
+    assert "<b>Closes when:</b> The drift is explained" in line_page
+    assert "branches: <a class=line href='../lines/L0003.html'>L0003 Fan</a>" in line_page
     fan = (folder / "lines" / "L0003.html").read_text()
     assert "from <a class=line href='../lines/L0001.html'>L0001 Heater</a>" in fan
 
@@ -796,8 +807,9 @@ def test_close_a_line_from_the_dashboard_with_why(served, tmp_path, acting):
     assert note["text"] == "Closed by Pat: The phase diagram lines have superseded it."
     assert run("check", "--repo", served) == 0
     index = (tmp_path / "state" / "dashboard" / "index.html").read_text()
-    row = index.split("data-line='demo/L0001'")[1].split("</tr>")[0]
-    assert "class=inactive hidden" in row and "<span class=status>closed</span>" in row
+    folded = index.split("<details class=inactive>")[1]  # there, behind the toggle
+    assert "Show the 1 paused, closed and dropped lines" in folded
+    assert "data-line='demo/L0001'" in folded and ">Closed</span>" in folded
     page = (tmp_path / "state" / "dashboard" / "demo" / "lines" / "L0001.html").read_text()
     assert "<h3>This line is closed</h3>" in page and "<button>Reopen L0001</button>" in page
     assert "Closed by Pat: The phase diagram lines have superseded it." in page
@@ -808,7 +820,11 @@ def test_close_a_line_from_the_dashboard_with_why(served, tmp_path, acting):
 
 
 def row(index, lid):
-    return index.split(f"data-line='demo/{lid}'")[1].split("</tr>")[0]
+    return index.split(f"data-line='demo/{lid}'")[1].split("<!--/row-->")[0]
+
+
+def line_page_of(tmp_path, lid):
+    return (tmp_path / "state" / "dashboard" / "demo" / "lines" / f"{lid}.html").read_text()
 
 
 def live_index(tmp_path):
@@ -826,7 +842,10 @@ def test_answers_wait_for_start_then_run_together(served, tmp_path, acting):
     assert code == 200 and "Nothing starts yet" in said
     text = (served / "lines" / "L0001" / "instruction.md").read_text()
     assert "> Should the heater go higher?" in text and "Pat, from the dashboard" in text
-    assert "<b>Your instruction</b>" in live_index(tmp_path)  # on the page at once
+    assert "Ready when you are" in row(live_index(tmp_path), "L0001")  # on the page at once
+    saved = line_page_of(tmp_path, "L0001")
+    assert "Also saved for its next run" in saved and "Yes, go higher." in saved
+    assert "1 instruction saved. Nothing runs until you press Start." in saved
     look(served, db)
     look(served, db)
     assert runs(db) == []  # saved, not started
@@ -845,7 +864,8 @@ def test_answers_wait_for_start_then_run_together(served, tmp_path, acting):
     assert ran["line"] == "L0001"
     assert "Your instruction is lines/L0001/instruction.md" in prompts(tmp_path)[0]
     after = dashboard_page(served, tmp_path, db)
-    assert "answered by run" in row(after, "L0001") and ">Idle</span>" in row(after, "L0001")
+    assert ">Idle</span>" in row(after, "L0001")
+    assert "Also saved for its next run" not in line_page_of(tmp_path, "L0001")  # the run took them
     code, said = acting(action="instruct", line="L0001", text="   ")
     assert code == 403 and "nothing was written" in said
 
@@ -900,7 +920,8 @@ def test_an_instruction_pushed_from_a_discussion_waits_for_start_too(served, tmp
     look(served, db)
     assert runs(db) == []
     index = dashboard_page(served, tmp_path, db)
-    assert "Ready when you are" in row(index, "L0003") and "Try the fan at half speed." in row(index, "L0003")
+    assert "Ready when you are" in row(index, "L0003") and "1 instruction saved" in row(index, "L0003")
+    assert "Try the fan at half speed." in line_page_of(tmp_path, "L0003")
     acting(action="start", line="L0003")
     look(served, db)
     assert [r["line"] for r in runs(db)] == ["L0003"]
@@ -913,9 +934,11 @@ def test_every_line_shows_its_state(served, tmp_path, monkeypatch):
     prog = config.load(served)
     index = dashboard_page(served, tmp_path, db)
     assert "<span class='state state-idle'>Idle</span>" in row(index, "L0001")
-    assert "<button>Start</button>" in row(index, "L0001")
-    assert "<span class='state state-proposed'>Proposed</span>" in row(index, "L0002")
-    assert "<button>Start</button>" not in row(index, "L0002")
+    assert "<button>" not in index  # Start is on each line's page, in the bar at its foot
+    assert "<div class=bar>" in line_page_of(tmp_path, "L0001")
+    assert "<button>Start L0001</button>" in line_page_of(tmp_path, "L0001")
+    assert "<span class='state state-you'>Proposed by the agent</span>" in row(index, "L0002")
+    assert "<button>Start L0002</button>" not in line_page_of(tmp_path, "L0002")
     asked = {"date": "2026-11-17", "line_id": "L0003", "instruction": "none",
              "headline": "A run with a question.", "experiments": [], "claims_changed": [],
              "questions": [{"question": "Should the fan go faster?",
@@ -927,9 +950,10 @@ def test_every_line_shows_its_state(served, tmp_path, monkeypatch):
     commit(served, "a run that asks")
     service.pause_line(db, prog, "L0001", "a merge conflicted")
     index = dashboard_page(served, tmp_path, db)
-    assert "<span class='state state-you'>Asks you 1 question</span>" in row(index, "L0003")
+    assert "<span class='state state-you'>Waiting on you</span>" in row(index, "L0003")
+    assert "0 of 1 question answered" in row(index, "L0003")
     assert "<span class='state state-stuck'>Stopped: needs fixing</span>" in row(index, "L0001")
-    assert "<button>Start</button>" not in row(index, "L0001")
+    assert "<button>Start L0001</button>" not in line_page_of(tmp_path, "L0001")
     service.resume(db, "demo:L0001")
     db.execute("INSERT INTO runs (program, line, day, stem, started, reasons) VALUES "
                "('demo', 'L0001', '2026-11-24', '2026-11-24-L0001', ?, '[]')",
@@ -945,8 +969,66 @@ def test_the_discuss_thread_writes_the_lines_own_instruction(served, tmp_path):
     from urllib.parse import parse_qs, urlparse
     import html
     index = dashboard_page(served, tmp_path, conn(tmp_path))
-    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", row(index, "L0001")).group(1))
+    link = html.unescape(re.search(r"href='(claude://code/new\?[^']+)'", line_page_of(tmp_path, "L0001")).group(1))
     prompt = parse_qs(urlparse(link).query)["q"][0]
     assert "append it to lines/L0001/instruction.md" in prompt
     assert "give me the `git push` command" in prompt and "press Start on L0001" in prompt
     assert "instructions/" not in prompt
+
+
+def test_a_line_page_tells_the_lines_story_and_answers_collapse(served, tmp_path, acting):
+    """Chris, Nov 24: "I answered the questions but the boxes are all still
+    there and my answers are gone", "it should explain clearly what the point
+    of the line is", "nothing from the checker that I can see. Why not?",
+    "I honestly have no idea if line 9 is going to run now or not"."""
+    db = conn(tmp_path)
+    append(served, "lines.jsonl", line(
+        "L0003", "update", purpose="Find out whether the fan changes the drift, because the "
+                                   "heater alone doesn't explain it."))
+    asked = {"date": "2026-11-17", "line_id": "L0003", "instruction": "none",
+             "headline": "A run with two questions.", "experiments": [], "claims_changed": [],
+             "answers": [{"asked": "Does the fan matter?", "status": "partly",
+                          "answer": "At full speed, yes."}],
+             "questions": [{"question": "Should the fan go faster?",
+                            "why_it_matters": "It decides the next run.",
+                            "default_if_unanswered": "Keep it where it is."},
+                           {"question": "Should the lid stay on?",
+                            "why_it_matters": "It changes the airflow.",
+                            "default_if_unanswered": "Leave it on."}],
+             "budget": {}, "open_blockers": [],
+             "proposed_directions": [{"direction": "Keep going.", "rationale": "No reason to stop."}]}
+    (served / "sessions" / "2026-11-17-L0003.json").write_text(json.dumps(asked))
+    commit(served, "a run that asks, and a purpose")
+    index = dashboard_page(served, tmp_path, db)
+    assert "Find out whether the fan changes the drift" in row(index, "L0003")
+    page = line_page_of(tmp_path, "L0003")
+    order = [page.index(mark) for mark in (
+        "<h3>What this line is for</h3>", "<h3>Where it stands</h3>", "<h3>Its latest run</h3>",
+        "<h3 id=your-turn>Your turn</h3>", "<details class=more>", "<div class=bar>")]
+    assert order == sorted(order)  # read top to bottom
+    assert "Find out whether the fan changes the drift" in page
+    assert "The agent (partly):</span> At full speed, yes." in page  # whose words they are
+    assert "Not checked. There is no review of this run." in page
+    assert page.count("<button>Save answer</button>") == 2
+    assert "0 of 2 questions answered. Unanswered questions take the default shown. " \
+           "Nothing runs until you press Start." in page
+    assert "The agent hasn't written this yet" in line_page_of(tmp_path, "L0001")  # no purpose
+
+    code, _ = acting(action="instruct", line="L0003", text="Yes, a notch faster.",
+                     question="Should the fan go faster?", anchor="your-turn",
+                     referer="/demo/lines/L0003.html")
+    assert code == 200
+    page = line_page_of(tmp_path, "L0003")
+    assert "✓ You answered:</span> Yes, a notch faster." in page
+    assert "<details><summary>Change your answer</summary>" in page
+    assert page.count("placeholder='Your answer.") == 2  # one open, one behind "Change"
+    assert "1 of 2 questions answered" in page
+    assert "1 of 2 questions answered" in row(live_index(tmp_path), "L0003")
+    assert "Waiting on you" in row(live_index(tmp_path), "L0003")
+    acting(action="instruct", line="L0003", text="On.", question="Should the lid stay on?")
+    assert "Ready when you are" in row(live_index(tmp_path), "L0003")
+    assert "2 of 2 questions answered. Nothing runs until you press Start." in \
+        line_page_of(tmp_path, "L0003")
+    look(served, db)
+    assert runs(db) == []  # still nothing runs until Start
+

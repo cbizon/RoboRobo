@@ -140,7 +140,7 @@ def instruct(program: Program, lid: str, text: str, question: str = "") -> str:
     path = program.repo / "lines" / lid / "instruction.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     at = now(program)
-    entry = [f"## {at:%Y-%m-%d %H:%M}, {program.scientist}, from the dashboard", ""]
+    entry = [f"## {at:%Y-%m-%d %H:%M:%S}, {program.scientist}, from the dashboard", ""]
     if question.strip():
         entry += ["You asked:", "", *(f"> {row}" for row in question.strip().splitlines()), "",
                   "Answer:", ""]
